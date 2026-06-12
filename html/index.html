@@ -264,10 +264,26 @@
   </div>
 
   <script>
-    const SUPABASE = {
-      url: "",
-      anonKey: "",
-    };
+    let SUPABASE = { url: "", anonKey: "" };
+    let supabaseConfigLoaded = false;
+
+    async function loadSupabaseConfig() {
+      if (supabaseConfigLoaded) return SUPABASE;
+      try {
+        const res = await fetch("/supabase-config.json", { cache: "no-store" });
+        if (res.ok) {
+          const json = await res.json();
+          SUPABASE = {
+            url: String(json.url || "").trim(),
+            anonKey: String(json.anonKey || "").trim(),
+          };
+        }
+      } catch {
+        // keep empty
+      }
+      supabaseConfigLoaded = true;
+      return SUPABASE;
+    }
 
     const FORMAT_LABELS = { word: "Word (.doc)", excel: "Excel (.xlsx)", pdf: "PDF (.pdf)" };
     let pendingDownloadFormat = null;
@@ -283,17 +299,18 @@
     }
 
     async function saveDownloadRequestToSupabase(payload) {
-      if (!SUPABASE.url || !SUPABASE.anonKey) {
-        throw new Error("Supabase 설정이 필요합니다. html/index.html의 SUPABASE.url, SUPABASE.anonKey를 입력해주세요.");
+      const cfg = await loadSupabaseConfig();
+      if (!cfg.url || !cfg.anonKey) {
+        throw new Error("Supabase 설정이 비어 있습니다. Vercel에 supabase_url, supabase_anon_key(anon public)를 넣고 Redeploy 해주세요.");
       }
 
-      const baseUrl = SUPABASE.url.replace(/\/$/, "");
+      const baseUrl = cfg.url.replace(/\/$/, "");
       const res = await fetch(`${baseUrl}/rest/v1/download_requests`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          apikey: SUPABASE.anonKey,
-          Authorization: `Bearer ${SUPABASE.anonKey}`,
+          apikey: cfg.anonKey,
+          Authorization: `Bearer ${cfg.anonKey}`,
           Prefer: "return=minimal",
         },
         body: JSON.stringify([{

@@ -2,6 +2,7 @@
 node_modules/
 frontend/node_modules/
 frontend/dist/
+frontend/public/supabase-config.json
 frontend/tsconfig.tsbuildinfo
 
 # Environment (API keys)

@@ -1,17 +1,11 @@
 import type { DownloadFormat } from "../components/DownloadMenu";
+import { getSupabaseRuntimeConfig } from "./supabaseConfig";
 
 export interface DownloadRequestPayload {
   email: string;
   nickname: string;
   format: DownloadFormat;
   recordCount?: number;
-}
-
-function getSupabaseConfig() {
-  return {
-    url: (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || "",
-    anonKey: (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)?.trim() || "",
-  };
 }
 
 export function validateDownloadForm(email: string, nickname: string): string | null {
@@ -57,8 +51,8 @@ function parseSupabaseError(status: number, text: string): string {
   if (text.includes("Invalid API key")) {
     return [
       "Supabase API 키가 올바르지 않습니다.",
-      "Vercel → supabase_anon_key 에 Supabase의 anon public 키만 넣었는지 확인하세요.",
-      "service_role 키와는 다른 값이어야 합니다. 수정 후 Redeploy가 필요합니다.",
+      "Vercel → supabase_anon_key 에 anon public 키를 넣었는지,",
+      "supabase_url 과 같은 프로젝트인지 확인 후 Redeploy 해주세요.",
     ].join(" ");
   }
 
@@ -66,11 +60,17 @@ function parseSupabaseError(status: number, text: string): string {
 }
 
 export async function saveDownloadRequest(payload: DownloadRequestPayload): Promise<void> {
-  const { url, anonKey } = getSupabaseConfig();
+  const { url, anonKey } = await getSupabaseRuntimeConfig();
 
   if (!url || !anonKey) {
     throw new Error(
       "Supabase 설정이 비어 있습니다. Vercel에 supabase_url, supabase_anon_key(anon public)를 넣고 Redeploy 해주세요."
+    );
+  }
+
+  if (!url.includes("supabase.co")) {
+    throw new Error(
+      "supabase_url 형식이 올바르지 않습니다. https://xxxx.supabase.co 형태인지 확인해주세요."
     );
   }
 
