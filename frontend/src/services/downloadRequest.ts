@@ -1,5 +1,4 @@
 import type { DownloadFormat } from "../components/DownloadMenu";
-import { getSupabase, isSupabaseConfigured } from "../lib/supabase";
 
 export interface DownloadRequestPayload {
   email: string;
@@ -23,25 +22,19 @@ export function validateDownloadForm(email: string, nickname: string): string | 
 }
 
 export async function saveDownloadRequest(payload: DownloadRequestPayload): Promise<void> {
-  if (!isSupabaseConfigured()) {
-    throw new Error(
-      "Supabase가 설정되지 않았습니다. VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY 환경 변수를 확인해주세요."
-    );
-  }
-
-  const supabase = getSupabase();
-  if (!supabase) {
-    throw new Error("Supabase 클라이언트를 초기화할 수 없습니다.");
-  }
-
-  const { error } = await supabase.from("download_requests").insert({
-    email: payload.email.trim(),
-    nickname: payload.nickname.trim(),
-    file_format: payload.format,
-    record_count: payload.recordCount ?? null,
+  const res = await fetch("/api/download/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: payload.email.trim(),
+      nickname: payload.nickname.trim(),
+      format: payload.format,
+      recordCount: payload.recordCount ?? null,
+    }),
   });
 
-  if (error) {
-    throw new Error(error.message || "다운로드 요청 저장에 실패했습니다.");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "다운로드 요청 저장에 실패했습니다.");
   }
 }

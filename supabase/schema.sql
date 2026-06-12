@@ -1,4 +1,5 @@
 -- Supabase SQL Editor에서 실행하세요.
+-- 저장은 Vercel/백엔드 API가 service_role 키(supabase_service_role_key)로 수행합니다.
 
 create table if not exists public.download_requests (
   id uuid primary key default gen_random_uuid(),
