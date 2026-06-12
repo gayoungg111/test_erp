@@ -1,5 +1,5 @@
-# Supabase SQL Editor에서 실행하세요.
-# 브라우저(anon key)에서 insert 하므로 아래 RLS 정책이 필요합니다.
+-- Supabase SQL Editor에서 실행하세요.
+-- 여러 번 실행해도 안전합니다. (DROP / DELETE 없음)
 
 create table if not exists public.download_requests (
   id uuid primary key default gen_random_uuid(),
@@ -15,10 +15,19 @@ create index if not exists download_requests_created_at_idx
 
 alter table public.download_requests enable row level security;
 
-drop policy if exists "Allow anonymous insert on download_requests" on public.download_requests;
-
-create policy "Allow anonymous insert on download_requests"
-  on public.download_requests
-  for insert
-  to anon
-  with check (true);
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_policies
+    where schemaname = 'public'
+      and tablename = 'download_requests'
+      and policyname = 'Allow anonymous insert on download_requests'
+  ) then
+    create policy "Allow anonymous insert on download_requests"
+      on public.download_requests
+      for insert
+      to anon
+      with check (true);
+  end if;
+end $$;
