@@ -16,4 +16,5 @@ export async function fetchSampleData(): Promise<ErpRecord[]> {
   return SAMPLE_DATA.map((r) => ({ ...r }));
 }
 
-export { generateGeminiReport, downloadReportAsPdf, downloadReportAsWord } from "./gemini";
+export { generateGeminiReport } from "./gemini";
+export { downloadReport, downloadReportAsPdf, downloadReportAsWord, downloadReportAsExcel } from "./reportDownload";

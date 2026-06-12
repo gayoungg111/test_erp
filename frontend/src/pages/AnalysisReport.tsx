@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import DownloadMenu, { type DownloadFormat } from "../components/DownloadMenu";
 import EmptyState from "../components/EmptyState";
 import { useData } from "../context/DataContext";
 import { generateBasicInsights } from "../services/analyzer";
-import {
-  downloadReportAsPdf,
-  downloadReportAsWord,
-  generateGeminiReport,
-} from "../services/gemini";
+import { generateGeminiReport } from "../services/gemini";
+import { downloadReport } from "../services/reportDownload";
 
 function renderMarkdown(text: string) {
   return text.split("\n").map((line, i) => {
@@ -42,7 +40,7 @@ export default function AnalysisReport() {
   const navigate = useNavigate();
   const { isValidated, summary, data, geminiReport, setGeminiReport } = useData();
   const [generating, setGenerating] = useState(false);
-  const [downloading, setDownloading] = useState<"pdf" | "word" | null>(null);
+  const [downloading, setDownloading] = useState<DownloadFormat | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -72,16 +70,15 @@ export default function AnalysisReport() {
     }
   };
 
-  const handleDownload = async (format: "pdf" | "word") => {
-    if (!geminiReport) {
-      setError("먼저 Gemini 보고서를 생성해주세요.");
-      return;
-    }
+  const handleDownload = async (format: DownloadFormat) => {
     setDownloading(format);
     setError("");
     try {
-      if (format === "pdf") await downloadReportAsPdf(geminiReport);
-      else await downloadReportAsWord(geminiReport);
+      await downloadReport(format, {
+        summary,
+        insights: generateBasicInsights(summary),
+        geminiReport,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "다운로드 실패");
     } finally {
@@ -91,14 +88,14 @@ export default function AnalysisReport() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+      <div className="flex w-full flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
           <h2 className="text-2xl font-bold text-slate-800">분석보고서</h2>
           <p className="mt-1 text-sm text-slate-500">
             기본 분석은 브라우저에서, AI 종합 보고서는 Google Gemini가 생성합니다.
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-3">
           <button
             onClick={handleGenerate}
             className="btn-primary"
@@ -106,24 +103,11 @@ export default function AnalysisReport() {
           >
             {generating ? "Gemini 생성 중..." : "✨ Gemini 보고서 생성"}
           </button>
-          {geminiReport && (
-            <>
-              <button
-                onClick={() => handleDownload("pdf")}
-                className="btn-secondary"
-                disabled={generating || downloading !== null}
-              >
-                {downloading === "pdf" ? "생성 중..." : "📥 PDF 다운로드"}
-              </button>
-              <button
-                onClick={() => handleDownload("word")}
-                className="btn-secondary"
-                disabled={generating || downloading !== null}
-              >
-                {downloading === "word" ? "생성 중..." : "📥 Word 다운로드"}
-              </button>
-            </>
-          )}
+          <DownloadMenu
+            onDownload={handleDownload}
+            disabled={generating}
+            loading={downloading}
+          />
         </div>
       </div>
 
@@ -269,4 +253,4 @@ export default function AnalysisReport() {
     </div>
   );
 }
-
+
