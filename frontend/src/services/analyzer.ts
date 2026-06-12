@@ -13,10 +13,105 @@ export const SAMPLE_DATA: ErpRecord[] = [
   { 날짜: "2025-05-28", 부서: "영업", 항목: "제품C", 금액: 2700000, 수량: 18, 거래처: "GHI마트", 비고: "대량주문" },
 ];
 
+const REQUIRED_COLUMNS = ["날짜", "부서", "항목", "금액", "수량"] as const;
+
+function normalizeColumnKey(key: string): string {
+  return key.trim().replace(/^\ufeff/, "");
+}
+
+function normalizeRow(raw: Record<string, unknown>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    row[normalizeColumnKey(key)] = value;
+  }
+  return row;
+}
+
+function excelSerialToDate(serial: number): Date {
+  // Excel serial date → JS Date (UTC)
+  const utcMs = (serial - 25569) * 86400 * 1000;
+  return new Date(utcMs);
+}
+
 function parseDate(value: unknown): Date | null {
   if (value === null || value === undefined || value === "") return null;
-  const d = new Date(String(value));
-  return isNaN(d.getTime()) ? null : d;
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+
+  if (typeof value === "number" && value > 30000 && value < 60000) {
+    const excelDate = excelSerialToDate(value);
+    if (!isNaN(excelDate.getTime())) return excelDate;
+  }
+
+  const str = String(value).trim();
+  if (!str) return null;
+
+  // YYYY.MM.DD / YYYY/MM/DD
+  const normalized = str.replace(/\./g, "-").replace(/\//g, "-");
+  const parsed = new Date(normalized);
+  if (!isNaN(parsed.getTime())) return parsed;
+
+  return null;
+}
+
+function parseNumber(value: unknown): number {
+  if (typeof value === "number" && !isNaN(value)) return value;
+  const str = String(value ?? "")
+    .replace(/,/g, "")
+    .replace(/원/g, "")
+    .replace(/\s/g, "")
+    .trim();
+  if (!str) return NaN;
+  return Number(str);
+}
+
+function formatDateLocal(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function isBlankRow(row: ErpRecord): boolean {
+  const emptyNum = (v: number) => v === undefined || v === null || (typeof v === "number" && isNaN(v));
+  return (
+    !String(row.날짜 ?? "").trim() &&
+    !String(row.부서 ?? "").trim() &&
+    !String(row.항목 ?? "").trim() &&
+    emptyNum(row.금액) &&
+    emptyNum(row.수량)
+  );
+}
+
+function validateColumns(rawRows: Record<string, unknown>[]): void {
+  if (!rawRows.length) return;
+  const first = normalizeRow(rawRows[0]);
+  const missing = REQUIRED_COLUMNS.filter((col) => !(col in first));
+  if (missing.length > 0) {
+    const found = Object.keys(first).join(", ") || "(없음)";
+    throw new Error(`필수 컬럼이 없습니다: ${missing.join(", ")}. (파일 컬럼: ${found})`);
+  }
+}
+
+function mapRawToRecord(raw: Record<string, unknown>): ErpRecord {
+  const row = normalizeRow(raw);
+  const dateRaw = row["날짜"];
+  let 날짜 = "";
+  if (dateRaw instanceof Date) {
+    날짜 = formatDateLocal(dateRaw);
+  } else if (dateRaw != null && dateRaw !== "") {
+    const d = parseDate(dateRaw);
+    날짜 = d ? formatDateLocal(d) : String(dateRaw);
+  }
+
+  return {
+    날짜,
+    부서: String(row["부서"] ?? "").trim(),
+    항목: String(row["항목"] ?? "").trim(),
+    금액: parseNumber(row["금액"]),
+    수량: parseNumber(row["수량"]),
+    거래처: row["거래처"] != null ? String(row["거래처"]).trim() : "",
+    비고: row["비고"] != null ? String(row["비고"]).trim() : "",
+  };
 }
 
 export function validateErpData(records: ErpRecord[]): ValidationResult {
@@ -24,7 +119,9 @@ export function validateErpData(records: ErpRecord[]): ValidationResult {
   const warnings: ValidationResult["warnings"] = [];
   const validRows: ErpRecord[] = [];
 
-  if (!records.length) {
+  const dataRows = records.filter((r) => !isBlankRow(r));
+
+  if (!dataRows.length) {
     return {
       valid: false,
       errors: [{ row: 0, field: "전체", message: "데이터가 비어 있습니다." }],
@@ -34,29 +131,29 @@ export function validateErpData(records: ErpRecord[]): ValidationResult {
     };
   }
 
-  records.forEach((row, idx) => {
+  dataRows.forEach((row, idx) => {
     const rowNum = idx + 1;
     const rowErrors: string[] = [];
 
     const dateVal = parseDate(row.날짜);
-    if (!dateVal) rowErrors.push("날짜 형식이 올바르지 않습니다.");
+    if (!dateVal) rowErrors.push(`날짜 형식이 올바르지 않습니다. (값: ${row.날짜 || "비어있음"})`);
 
     if (!row.부서 || String(row.부서).trim() === "") rowErrors.push("부서는 필수입니다.");
     if (!row.항목 || String(row.항목).trim() === "") rowErrors.push("항목은 필수입니다.");
 
-    const amount = Number(row.금액);
-    if (isNaN(amount)) rowErrors.push("금액은 숫자여야 합니다.");
+    const amount = typeof row.금액 === "number" ? row.금액 : parseNumber(row.금액);
+    if (isNaN(amount)) rowErrors.push(`금액은 숫자여야 합니다. (값: ${row.금액})`);
     else if (amount < 0) warnings.push({ row: rowNum, field: "금액", message: "금액이 음수입니다." });
 
-    const qty = Number(row.수량);
-    if (isNaN(qty)) rowErrors.push("수량은 숫자여야 합니다.");
+    const qty = typeof row.수량 === "number" ? row.수량 : parseNumber(row.수량);
+    if (isNaN(qty)) rowErrors.push(`수량은 숫자여야 합니다. (값: ${row.수량})`);
     else if (qty < 0) warnings.push({ row: rowNum, field: "수량", message: "수량이 음수입니다." });
 
     if (rowErrors.length) {
       rowErrors.forEach((msg) => errors.push({ row: rowNum, field: "검증", message: msg }));
     } else if (dateVal) {
       validRows.push({
-        날짜: dateVal.toISOString().slice(0, 10),
+        날짜: formatDateLocal(dateVal),
         부서: String(row.부서).trim(),
         항목: String(row.항목).trim(),
         금액: amount,
@@ -166,21 +263,16 @@ export async function parseUploadedFile(file: File): Promise<ErpRecord[]> {
     const text = new TextDecoder("utf-8").decode(buffer);
     workbook = XLSX.read(text, { type: "string" });
   } else {
-    workbook = XLSX.read(buffer, { type: "array" });
+    workbook = XLSX.read(buffer, { type: "array", cellDates: true });
   }
 
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
 
-  return raw.map((row) => ({
-    날짜: String(row["날짜"] ?? ""),
-    부서: String(row["부서"] ?? ""),
-    항목: String(row["항목"] ?? ""),
-    금액: Number(row["금액"] ?? 0),
-    수량: Number(row["수량"] ?? 0),
-    거래처: row["거래처"] != null ? String(row["거래처"]) : "",
-    비고: row["비고"] != null ? String(row["비고"]) : "",
-  }));
+  if (!raw.length) return [];
+  validateColumns(raw);
+
+  return raw.map(mapRawToRecord).filter((r) => !isBlankRow(r));
 }
 
 const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls"];

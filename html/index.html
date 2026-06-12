@@ -225,34 +225,105 @@
 
     function fmt(n) { return Number(n || 0).toLocaleString(); }
 
+    function normalizeKey(key) { return key.trim().replace(/^\ufeff/, ""); }
+
+    function normalizeRow(raw) {
+      const row = {};
+      for (const [k, v] of Object.entries(raw)) row[normalizeKey(k)] = v;
+      return row;
+    }
+
+    function excelSerialToDate(serial) {
+      return new Date((serial - 25569) * 86400 * 1000);
+    }
+
     function parseDate(v) {
-      if (!v && v !== 0) return null;
-      const d = new Date(v);
+      if (v === null || v === undefined || v === "") return null;
+      if (v instanceof Date && !isNaN(v.getTime())) return v;
+      if (typeof v === "number" && v > 30000 && v < 60000) {
+        const d = excelSerialToDate(v);
+        if (!isNaN(d.getTime())) return d;
+      }
+      const str = String(v).trim();
+      if (!str) return null;
+      const normalized = str.replace(/\./g, "-").replace(/\//g, "-");
+      const d = new Date(normalized);
       return isNaN(d.getTime()) ? null : d;
+    }
+
+    function parseNumber(v) {
+      if (typeof v === "number" && !isNaN(v)) return v;
+      const str = String(v ?? "").replace(/,/g, "").replace(/원/g, "").replace(/\s/g, "").trim();
+      if (!str) return NaN;
+      return Number(str);
+    }
+
+    function formatDateLocal(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+
+    function isBlankRow(row) {
+      const emptyNum = (v) => v === undefined || v === null || (typeof v === "number" && isNaN(v));
+      return !String(row.날짜 ?? "").trim() && !String(row.부서 ?? "").trim() &&
+        !String(row.항목 ?? "").trim() && emptyNum(row.금액) && emptyNum(row.수량);
+    }
+
+    function mapRawToRecord(raw) {
+      const row = normalizeRow(raw);
+      let 날짜 = "";
+      const dateRaw = row["날짜"];
+      if (dateRaw instanceof Date) 날짜 = formatDateLocal(dateRaw);
+      else if (dateRaw != null && dateRaw !== "") {
+        const d = parseDate(dateRaw);
+        날짜 = d ? formatDateLocal(d) : String(dateRaw);
+      }
+      return {
+        날짜,
+        부서: String(row["부서"] ?? "").trim(),
+        항목: String(row["항목"] ?? "").trim(),
+        금액: parseNumber(row["금액"]),
+        수량: parseNumber(row["수량"]),
+        거래처: row["거래처"] != null ? String(row["거래처"]).trim() : "",
+        비고: row["비고"] != null ? String(row["비고"]).trim() : "",
+      };
+    }
+
+    function validateColumns(rawRows) {
+      if (!rawRows.length) return;
+      const first = normalizeRow(rawRows[0]);
+      const missing = REQUIRED.filter(col => !(col in first));
+      if (missing.length) {
+        const found = Object.keys(first).join(", ") || "(없음)";
+        throw new Error(`필수 컬럼이 없습니다: ${missing.join(", ")}. (파일 컬럼: ${found})`);
+      }
     }
 
     function validateErpData(records) {
       const errors = [], warnings = [], validRows = [];
-      if (!records.length) {
+      const dataRows = records.filter(r => !isBlankRow(r));
+      if (!dataRows.length) {
         return { valid: false, errors: [{ row: 0, field: "전체", message: "데이터가 비어 있습니다." }], warnings: [], summary: {}, data: [] };
       }
-      records.forEach((row, idx) => {
+      dataRows.forEach((row, idx) => {
         const rowNum = idx + 1;
         const rowErrors = [];
         const dateVal = parseDate(row.날짜);
-        if (!dateVal) rowErrors.push("날짜 형식이 올바르지 않습니다.");
+        if (!dateVal) rowErrors.push(`날짜 형식이 올바르지 않습니다. (값: ${row.날짜 || "비어있음"})`);
         if (!row.부서 || String(row.부서).trim() === "") rowErrors.push("부서는 필수입니다.");
         if (!row.항목 || String(row.항목).trim() === "") rowErrors.push("항목은 필수입니다.");
-        let amount = Number(row.금액);
-        if (isNaN(amount)) rowErrors.push("금액은 숫자여야 합니다.");
+        const amount = typeof row.금액 === "number" ? row.금액 : parseNumber(row.금액);
+        if (isNaN(amount)) rowErrors.push(`금액은 숫자여야 합니다. (값: ${row.금액})`);
         else if (amount < 0) warnings.push({ row: rowNum, field: "금액", message: "금액이 음수입니다." });
-        let qty = Number(row.수량);
-        if (isNaN(qty)) rowErrors.push("수량은 숫자여야 합니다.");
+        const qty = typeof row.수량 === "number" ? row.수량 : parseNumber(row.수량);
+        if (isNaN(qty)) rowErrors.push(`수량은 숫자여야 합니다. (값: ${row.수량})`);
         else if (qty < 0) warnings.push({ row: rowNum, field: "수량", message: "수량이 음수입니다." });
         if (rowErrors.length) rowErrors.forEach(m => errors.push({ row: rowNum, field: "검증", message: m }));
         else {
           validRows.push({
-            날짜: dateVal.toISOString().slice(0, 10),
+            날짜: formatDateLocal(dateVal),
             부서: String(row.부서).trim(),
             항목: String(row.항목).trim(),
             금액: amount, 수량: qty,
@@ -669,20 +740,19 @@ ${JSON.stringify(state.data, null, 2)}`;
         const reader = new FileReader();
         reader.onload = (e) => {
           try {
-            let records;
-            if (file.name.endsWith(".csv")) {
-              const text = e.target.result;
-              const wb = XLSX.read(text, { type: "string" });
-              records = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+            let wb, records;
+            if (file.name.toLowerCase().endsWith(".csv")) {
+              wb = XLSX.read(e.target.result, { type: "string" });
             } else {
-              const wb = XLSX.read(e.target.result, { type: "array" });
-              records = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+              wb = XLSX.read(e.target.result, { type: "array", cellDates: true });
             }
-            resolve(records);
+            records = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+            validateColumns(records);
+            resolve(records.map(mapRawToRecord).filter(r => !isBlankRow(r)));
           } catch (err) { reject(err); }
         };
         reader.onerror = reject;
-        if (file.name.endsWith(".csv")) reader.readAsText(file, "UTF-8");
+        if (file.name.toLowerCase().endsWith(".csv")) reader.readAsText(file, "UTF-8");
         else reader.readAsArrayBuffer(file);
       });
     }
