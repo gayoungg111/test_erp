@@ -271,10 +271,80 @@
         !String(row.항목 ?? "").trim() && emptyNum(row.금액) && emptyNum(row.수량);
     }
 
+    const FIELD_ALIASES = {
+      날짜: ["날짜","date","order_date","join_date","일자"],
+      부서: ["부서","department","channel","category","customer_type"],
+      항목: ["항목","item","product_name","product","product_id","name"],
+      금액: ["금액","amount","amount_krw","total_amount_krw","unit_price_krw","price"],
+      수량: ["수량","qty","quantity","stock_qty","count"],
+      거래처: ["거래처","customer","customer_name","customer_id"],
+      비고: ["비고","status","note","remarks"],
+    };
+
+    function getField(row, field) {
+      if (row[field] !== undefined && row[field] !== "") return row[field];
+      const lower = Object.fromEntries(Object.entries(row).map(([k,v]) => [k.toLowerCase(), v]));
+      for (const alias of (FIELD_ALIASES[field] || [field])) {
+        const val = lower[alias.toLowerCase()];
+        if (val !== undefined && val !== "") return val;
+      }
+      return undefined;
+    }
+
+    function detectFileType(rows) {
+      if (!rows.length) return "generic";
+      const keys = new Set(Object.keys(normalizeRow(rows[0])).map(k => k.toLowerCase()));
+      if (keys.has("order_no") && keys.has("order_date")) return "sales_orders";
+      if (keys.has("order_no") && keys.has("product_id") && keys.has("qty")) return "sales_order_items";
+      if (keys.has("product_id") && keys.has("product_name")) return "products";
+      if (keys.has("customer_id") && keys.has("customer_name")) return "customers";
+      return "generic";
+    }
+
+    function mergeSalesErp(parsedFiles) {
+      const byType = (t) => (parsedFiles.find(f => detectFileType(f.rows) === t)?.rows || []).map(normalizeRow);
+      const orders = byType("sales_orders"), items = byType("sales_order_items");
+      const products = byType("products"), customers = byType("customers");
+      const orderMap = new Map(orders.map(r => [String(r.order_no), r]));
+      const productMap = new Map(products.map(r => [String(r.product_id), r]));
+      const customerMap = new Map(customers.map(r => [String(r.customer_id), r]));
+      const records = [];
+      if (items.length) {
+        for (const item of items) {
+          const order = orderMap.get(String(item.order_no));
+          const product = productMap.get(String(item.product_id));
+          const customer = order ? customerMap.get(String(order.customer_id)) : undefined;
+          const d = parseDate(order?.order_date);
+          if (!d) continue;
+          records.push({
+            날짜: formatDateLocal(d),
+            부서: String(order?.channel || product?.category || "미분류"),
+            항목: String(product?.product_name || item.product_id || "품목"),
+            금액: parseNumber(item.amount_krw ?? item.unit_price_krw),
+            수량: parseNumber(item.qty),
+            거래처: String(customer?.customer_name || order?.customer_id || ""),
+            비고: String(order?.status || ""),
+          });
+        }
+      } else if (orders.length) {
+        for (const order of orders) {
+          const customer = customerMap.get(String(order.customer_id));
+          const d = parseDate(order.order_date);
+          if (!d) continue;
+          records.push({
+            날짜: formatDateLocal(d), 부서: String(order.channel || "미분류"),
+            항목: `주문 ${order.order_no}`, 금액: parseNumber(order.total_amount_krw), 수량: 1,
+            거래처: String(customer?.customer_name || ""), 비고: String(order.status || ""),
+          });
+        }
+      }
+      return records;
+    }
+
     function mapRawToRecord(raw) {
       const row = normalizeRow(raw);
+      const dateRaw = getField(row, "날짜");
       let 날짜 = "";
-      const dateRaw = row["날짜"];
       if (dateRaw instanceof Date) 날짜 = formatDateLocal(dateRaw);
       else if (dateRaw != null && dateRaw !== "") {
         const d = parseDate(dateRaw);
@@ -282,23 +352,13 @@
       }
       return {
         날짜,
-        부서: String(row["부서"] ?? "").trim(),
-        항목: String(row["항목"] ?? "").trim(),
-        금액: parseNumber(row["금액"]),
-        수량: parseNumber(row["수량"]),
-        거래처: row["거래처"] != null ? String(row["거래처"]).trim() : "",
-        비고: row["비고"] != null ? String(row["비고"]).trim() : "",
+        부서: String(getField(row, "부서") ?? "").trim(),
+        항목: String(getField(row, "항목") ?? "").trim(),
+        금액: parseNumber(getField(row, "금액")),
+        수량: parseNumber(getField(row, "수량")),
+        거래처: getField(row, "거래처") != null ? String(getField(row, "거래처")).trim() : "",
+        비고: getField(row, "비고") != null ? String(getField(row, "비고")).trim() : "",
       };
-    }
-
-    function validateColumns(rawRows) {
-      if (!rawRows.length) return;
-      const first = normalizeRow(rawRows[0]);
-      const missing = REQUIRED.filter(col => !(col in first));
-      if (missing.length) {
-        const found = Object.keys(first).join(", ") || "(없음)";
-        throw new Error(`필수 컬럼이 없습니다: ${missing.join(", ")}. (파일 컬럼: ${found})`);
-      }
     }
 
     function validateErpData(records) {
@@ -735,20 +795,15 @@ ${JSON.stringify(state.data, null, 2)}`;
       ).join("");
     }
 
-    function parseFile(file) {
+    function parseRawFile(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
           try {
-            let wb, records;
-            if (file.name.toLowerCase().endsWith(".csv")) {
-              wb = XLSX.read(e.target.result, { type: "string" });
-            } else {
-              wb = XLSX.read(e.target.result, { type: "array", cellDates: true });
-            }
-            records = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
-            validateColumns(records);
-            resolve(records.map(mapRawToRecord).filter(r => !isBlankRow(r)));
+            let wb;
+            if (file.name.toLowerCase().endsWith(".csv")) wb = XLSX.read(e.target.result, { type: "string" });
+            else wb = XLSX.read(e.target.result, { type: "array", cellDates: true });
+            resolve(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" }));
           } catch (err) { reject(err); }
         };
         reader.onerror = reject;
@@ -760,12 +815,15 @@ ${JSON.stringify(state.data, null, 2)}`;
     async function parseFiles(files) {
       const valid = Array.from(files).filter(f => isAllowedFile(f.name));
       if (!valid.length) throw new Error("CSV 또는 Excel 파일만 업로드 가능합니다.");
-      const all = [];
-      for (const file of valid) {
-        const records = await parseFile(file);
-        all.push(...records);
+      const parsed = [];
+      for (const file of valid) parsed.push({ name: file.name, rows: await parseRawFile(file) });
+      const hasSales = parsed.some(p => ["sales_orders","sales_order_items"].includes(detectFileType(p.rows)));
+      let records = hasSales ? mergeSalesErp(parsed) : [];
+      if (!records.length) {
+        for (const { rows } of parsed) records.push(...rows.map(mapRawToRecord).filter(r => !isBlankRow(r)));
       }
-      return { records: all, fileNames: valid.map(f => f.name) };
+      if (!records.length) throw new Error("분석 가능한 데이터를 찾지 못했습니다.");
+      return { records, fileNames: valid.map(f => f.name) };
     }
 
     async function handleFilesUpload(files) {

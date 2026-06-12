@@ -13,8 +13,6 @@ export const SAMPLE_DATA: ErpRecord[] = [
   { 날짜: "2025-05-28", 부서: "영업", 항목: "제품C", 금액: 2700000, 수량: 18, 거래처: "GHI마트", 비고: "대량주문" },
 ];
 
-const REQUIRED_COLUMNS = ["날짜", "부서", "항목", "금액", "수량"] as const;
-
 function normalizeColumnKey(key: string): string {
   return key.trim().replace(/^\ufeff/, "");
 }
@@ -82,19 +80,32 @@ function isBlankRow(row: ErpRecord): boolean {
   );
 }
 
-function validateColumns(rawRows: Record<string, unknown>[]): void {
-  if (!rawRows.length) return;
-  const first = normalizeRow(rawRows[0]);
-  const missing = REQUIRED_COLUMNS.filter((col) => !(col in first));
-  if (missing.length > 0) {
-    const found = Object.keys(first).join(", ") || "(없음)";
-    throw new Error(`필수 컬럼이 없습니다: ${missing.join(", ")}. (파일 컬럼: ${found})`);
+const FIELD_ALIASES: Record<string, string[]> = {
+  날짜: ["날짜", "date", "order_date", "join_date", "일자", "거래일", "transaction_date"],
+  부서: ["부서", "department", "dept", "channel", "category", "customer_type", "division"],
+  항목: ["항목", "item", "product_name", "product", "product_id", "name", "품목", "item_name"],
+  금액: ["금액", "amount", "amount_krw", "total_amount_krw", "unit_price_krw", "price", "total"],
+  수량: ["수량", "qty", "quantity", "stock_qty", "count"],
+  거래처: ["거래처", "customer", "customer_name", "customer_id", "vendor", "client"],
+  비고: ["비고", "status", "note", "remarks", "memo", "description"],
+};
+
+function getField(row: Record<string, unknown>, field: string): unknown {
+  if (row[field] !== undefined && row[field] !== "") return row[field];
+  const aliases = FIELD_ALIASES[field] || [field];
+  const lowerMap = Object.fromEntries(
+    Object.entries(row).map(([k, v]) => [k.toLowerCase(), v])
+  );
+  for (const alias of aliases) {
+    const val = lowerMap[alias.toLowerCase()];
+    if (val !== undefined && val !== "") return val;
   }
+  return undefined;
 }
 
 function mapRawToRecord(raw: Record<string, unknown>): ErpRecord {
   const row = normalizeRow(raw);
-  const dateRaw = row["날짜"];
+  const dateRaw = getField(row, "날짜");
   let 날짜 = "";
   if (dateRaw instanceof Date) {
     날짜 = formatDateLocal(dateRaw);
@@ -105,13 +116,97 @@ function mapRawToRecord(raw: Record<string, unknown>): ErpRecord {
 
   return {
     날짜,
-    부서: String(row["부서"] ?? "").trim(),
-    항목: String(row["항목"] ?? "").trim(),
-    금액: parseNumber(row["금액"]),
-    수량: parseNumber(row["수량"]),
-    거래처: row["거래처"] != null ? String(row["거래처"]).trim() : "",
-    비고: row["비고"] != null ? String(row["비고"]).trim() : "",
+    부서: String(getField(row, "부서") ?? "").trim(),
+    항목: String(getField(row, "항목") ?? "").trim(),
+    금액: parseNumber(getField(row, "금액")),
+    수량: parseNumber(getField(row, "수량")),
+    거래처: getField(row, "거래처") != null ? String(getField(row, "거래처")).trim() : "",
+    비고: getField(row, "비고") != null ? String(getField(row, "비고")).trim() : "",
   };
+}
+
+interface ParsedFile {
+  name: string;
+  rows: Record<string, unknown>[];
+}
+
+function detectFileType(rows: Record<string, unknown>[]): string {
+  if (!rows.length) return "generic";
+  const keys = new Set(Object.keys(normalizeRow(rows[0])).map((k) => k.toLowerCase()));
+  if (keys.has("order_no") && keys.has("order_date")) return "sales_orders";
+  if (keys.has("order_no") && keys.has("product_id") && keys.has("qty")) return "sales_order_items";
+  if (keys.has("product_id") && keys.has("product_name")) return "products";
+  if (keys.has("customer_id") && keys.has("customer_name")) return "customers";
+  return "generic";
+}
+
+function mergeSalesErp(files: ParsedFile[]): ErpRecord[] {
+  const byType = (type: string) => files.find((f) => detectFileType(f.rows) === type)?.rows ?? [];
+
+  const orders = byType("sales_orders").map(normalizeRow);
+  const items = byType("sales_order_items").map(normalizeRow);
+  const products = byType("products").map(normalizeRow);
+  const customers = byType("customers").map(normalizeRow);
+
+  const orderMap = new Map(orders.map((r) => [String(r.order_no), r]));
+  const productMap = new Map(products.map((r) => [String(r.product_id), r]));
+  const customerMap = new Map(customers.map((r) => [String(r.customer_id), r]));
+
+  const records: ErpRecord[] = [];
+
+  if (items.length > 0) {
+    for (const item of items) {
+      const order = orderMap.get(String(item.order_no));
+      const product = productMap.get(String(item.product_id));
+      const customer = order ? customerMap.get(String(order.customer_id)) : undefined;
+      const d = parseDate(order?.order_date);
+      if (!d) continue;
+
+      records.push({
+        날짜: formatDateLocal(d),
+        부서: String(order?.channel || product?.category || "미분류"),
+        항목: String(product?.product_name || item.product_id || "품목"),
+        금액: parseNumber(item.amount_krw ?? item.unit_price_krw),
+        수량: parseNumber(item.qty),
+        거래처: String(customer?.customer_name || order?.customer_id || ""),
+        비고: String(order?.status || ""),
+      });
+    }
+  } else if (orders.length > 0) {
+    for (const order of orders) {
+      const customer = customerMap.get(String(order.customer_id));
+      const d = parseDate(order.order_date);
+      if (!d) continue;
+
+      records.push({
+        날짜: formatDateLocal(d),
+        부서: String(order.channel || "미분류"),
+        항목: `주문 ${order.order_no}`,
+        금액: parseNumber(order.total_amount_krw),
+        수량: 1,
+        거래처: String(customer?.customer_name || ""),
+        비고: String(order.status || ""),
+      });
+    }
+  }
+
+  return records;
+}
+
+async function parseRawFile(file: File): Promise<Record<string, unknown>[]> {
+  const XLSX = await import("xlsx");
+  const buffer = await file.arrayBuffer();
+
+  let workbook;
+  if (file.name.toLowerCase().endsWith(".csv")) {
+    const text = new TextDecoder("utf-8").decode(buffer);
+    workbook = XLSX.read(text, { type: "string" });
+  } else {
+    workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+  }
+
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  return XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
 }
 
 export function validateErpData(records: ErpRecord[]): ValidationResult {
@@ -255,23 +350,8 @@ export function generateBasicInsights(summary: Summary): string[] {
 }
 
 export async function parseUploadedFile(file: File): Promise<ErpRecord[]> {
-  const XLSX = await import("xlsx");
-  const buffer = await file.arrayBuffer();
-
-  let workbook;
-  if (file.name.toLowerCase().endsWith(".csv")) {
-    const text = new TextDecoder("utf-8").decode(buffer);
-    workbook = XLSX.read(text, { type: "string" });
-  } else {
-    workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-  }
-
-  const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-
+  const raw = await parseRawFile(file);
   if (!raw.length) return [];
-  validateColumns(raw);
-
   return raw.map(mapRawToRecord).filter((r) => !isBlankRow(r));
 }
 
@@ -291,10 +371,35 @@ export async function parseUploadedFiles(files: File[]): Promise<{
     throw new Error("CSV 또는 Excel(.csv, .xlsx, .xls) 파일만 업로드 가능합니다.");
   }
 
-  const records: ErpRecord[] = [];
+  const parsed: ParsedFile[] = [];
   for (const file of validFiles) {
-    const parsed = await parseUploadedFile(file);
-    records.push(...parsed);
+    parsed.push({ name: file.name, rows: await parseRawFile(file) });
+  }
+
+  const hasSalesData = parsed.some((p) => {
+    const t = detectFileType(p.rows);
+    return t === "sales_orders" || t === "sales_order_items";
+  });
+
+  let records: ErpRecord[] = [];
+
+  if (hasSalesData) {
+    records = mergeSalesErp(parsed);
+  }
+
+  if (!records.length) {
+    for (const { rows } of parsed) {
+      records.push(...rows.map(mapRawToRecord).filter((r) => !isBlankRow(r)));
+    }
+  }
+
+  if (!records.length) {
+    const sampleKeys = parsed[0]?.rows[0]
+      ? Object.keys(normalizeRow(parsed[0].rows[0])).join(", ")
+      : "(없음)";
+    throw new Error(
+      `분석 가능한 데이터를 찾지 못했습니다. 필수 정보: 날짜, 부서, 항목, 금액, 수량 (파일 컬럼: ${sampleKeys})`
+    );
   }
 
   return { records, fileNames: validFiles.map((f) => f.name) };

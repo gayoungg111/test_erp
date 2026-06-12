@@ -24,6 +24,8 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Logs
+# User data files
+/*.csv
+
 *.log
 npm-debug.log*
