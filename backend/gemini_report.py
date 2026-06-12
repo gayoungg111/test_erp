@@ -5,7 +5,7 @@ import os
 
 import google.generativeai as genai
 
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
 
 
 def _build_prompt(data: list[dict], summary: dict) -> str:
@@ -38,7 +38,7 @@ def generate_gemini_report(data: list[dict], summary: dict) -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError(
-            "GEMINI_API_KEY 환경 변수가 설정되지 않았습니다. backend/.env 파일을 확인하세요."
+            "GEMINI_API_KEY 환경 변수가 설정되지 않았습니다. backend/.env 또는 Vercel 환경 변수를 확인하세요."
         )
 
     genai.configure(api_key=api_key)
