@@ -1,41 +1,159 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { insertDownloadRequest, validateDownloadInput } from "../../lib/supabase-server";
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+type DownloadFormat = "word" | "excel" | "pdf";
 
-  if (req.method === "OPTIONS") {
-    return res.status(204).end();
+interface DownloadRegisterInput {
+  email: string;
+  nickname: string;
+  format: DownloadFormat;
+  recordCount?: number;
+}
+
+function readEnv(name: string): string {
+  return (process.env[name] || "").trim();
+}
+
+function getSupabaseEnv() {
+  const url =
+    readEnv("supabase_url") ||
+    readEnv("SUPABASE_URL") ||
+    readEnv("VITE_SUPABASE_URL");
+  const serviceRoleKey =
+    readEnv("supabase_service_role_key") ||
+    readEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  return { url, serviceRoleKey };
+}
+
+function parseBody(req: VercelRequest): Record<string, unknown> {
+  const raw = req.body;
+  if (!raw) return {};
+  if (typeof raw === "object" && !Buffer.isBuffer(raw)) {
+    return raw as Record<string, unknown>;
   }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ detail: "Method not allowed" });
+  const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw);
+  try {
+    return JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    return {};
   }
+}
 
-  const { email, nickname, format, recordCount } = req.body ?? {};
+function validateDownloadInput(input: DownloadRegisterInput): string | null {
+  const email = input.email.trim();
+  const nickname = input.nickname.trim();
 
-  const validationError = validateDownloadInput({
-    email: String(email ?? ""),
-    nickname: String(nickname ?? ""),
-    format: format as "word" | "excel" | "pdf",
-    recordCount: typeof recordCount === "number" ? recordCount : undefined,
-  });
+  if (!nickname) return "닉네임을 입력해주세요.";
+  if (nickname.length > 50) return "닉네임은 50자 이내로 입력해주세요.";
+  if (!email) return "이메일을 입력해주세요.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "올바른 이메일 형식을 입력해주세요.";
+  if (!["word", "excel", "pdf"].includes(input.format)) return "지원하지 않는 파일 형식입니다.";
 
-  if (validationError) {
-    return res.status(400).json({ detail: validationError });
-  }
+  return null;
+}
+
+function parseSupabaseError(status: number, body: string): string {
+  if (!body) return `Supabase 저장 실패 (HTTP ${status})`;
 
   try {
-    await insertDownloadRequest({
-      email: String(email),
-      nickname: String(nickname),
-      format,
-      recordCount: typeof recordCount === "number" ? recordCount : undefined,
-    });
+    const json = JSON.parse(body) as {
+      message?: string;
+      error?: string;
+      hint?: string;
+      details?: string;
+      code?: string;
+    };
+    const parts = [
+      json.message || json.error,
+      json.details,
+      json.hint,
+      json.code ? `code=${json.code}` : "",
+    ].filter(Boolean);
+    if (parts.length) return parts.join(" · ");
+  } catch {
+    // plain text
+  }
+
+  return body.length > 200 ? `${body.slice(0, 200)}...` : body;
+}
+
+async function insertDownloadRequest(input: DownloadRegisterInput): Promise<void> {
+  const { url, serviceRoleKey } = getSupabaseEnv();
+
+  if (!url) {
+    throw new Error("Supabase URL(supabase_url) 환경 변수가 설정되지 않았습니다.");
+  }
+  if (!serviceRoleKey) {
+    throw new Error("Supabase service role key(supabase_service_role_key) 환경 변수가 설정되지 않았습니다.");
+  }
+
+  const baseUrl = url.replace(/\/$/, "");
+  const response = await fetch(`${baseUrl}/rest/v1/download_requests`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+      Prefer: "return=minimal",
+    },
+    body: JSON.stringify([
+      {
+        email: input.email.trim(),
+        nickname: input.nickname.trim(),
+        file_format: input.format,
+        record_count: input.recordCount ?? null,
+      },
+    ]),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(parseSupabaseError(response.status, body));
+  }
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  try {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+    if (req.method === "OPTIONS") {
+      return res.status(204).end();
+    }
+
+    if (req.method === "GET") {
+      const { url, serviceRoleKey } = getSupabaseEnv();
+      return res.status(200).json({
+        ok: true,
+        configured: Boolean(url && serviceRoleKey),
+      });
+    }
+
+    if (req.method !== "POST") {
+      return res.status(405).json({ detail: "Method not allowed" });
+    }
+
+    const body = parseBody(req);
+    const email = String(body.email ?? "");
+    const nickname = String(body.nickname ?? "");
+    const format = String(body.format ?? "") as DownloadFormat;
+    const recordCount =
+      typeof body.recordCount === "number"
+        ? body.recordCount
+        : typeof body.record_count === "number"
+          ? body.record_count
+          : undefined;
+
+    const validationError = validateDownloadInput({ email, nickname, format, recordCount });
+    if (validationError) {
+      return res.status(400).json({ detail: validationError });
+    }
+
+    await insertDownloadRequest({ email, nickname, format, recordCount });
     return res.status(200).json({ ok: true });
   } catch (error) {
+    console.error("[download/register]", error);
     const message = error instanceof Error ? error.message : "다운로드 요청 저장 오류";
     return res.status(500).json({ detail: message });
   }
