@@ -170,7 +170,7 @@
       <!-- 데이터 입력 -->
       <section id="page-input" class="page active">
         <h2 class="page-title">데이터 입력</h2>
-        <p class="page-desc">ERP 거래 데이터를 직접 입력하거나 CSV/Excel 파일을 업로드하세요. 여러 파일을 한번에 올릴 수 있습니다.</p>
+        <p class="page-desc">CSV/Excel 파일을 업로드하면 대시보드·분석보고서·원본데이터가 자동으로 채워집니다.</p>
         <div class="card">
           <div id="drop-zone" class="drop-zone">
             <input type="file" id="file-upload" accept=".csv,.xlsx,.xls" multiple hidden />
@@ -181,22 +181,8 @@
           </div>
           <div class="toolbar">
             <button class="btn btn-secondary" id="btn-sample">샘플 데이터 불러오기</button>
-            <button class="btn btn-secondary" id="btn-add-row">+ 행 추가</button>
-            <div class="spacer"></div>
-            <button class="btn btn-primary" id="btn-validate">데이터 검증</button>
           </div>
           <div class="hint"><strong>필수 컬럼:</strong> 날짜, 부서, 항목, 금액, 수량 · 선택: 거래처, 비고</div>
-          <div class="table-scroll">
-            <table id="input-table">
-              <thead>
-                <tr>
-                  <th>날짜</th><th>부서</th><th>항목</th><th>금액</th><th>수량</th>
-                  <th>거래처</th><th>비고</th><th style="width:40px"></th>
-                </tr>
-              </thead>
-              <tbody id="input-tbody"></tbody>
-            </table>
-          </div>
         </div>
         <div id="input-error"></div>
         <div id="validation-result"></div>
@@ -312,46 +298,6 @@
       };
     }
 
-    function emptyRow() {
-      return { 날짜: "", 부서: "", 항목: "", 금액: "", 수량: "", 거래처: "", 비고: "" };
-    }
-
-    function getInputRows() {
-      return [...document.querySelectorAll("#input-tbody tr")].map(tr => ({
-        날짜: tr.querySelector('[data-f="날짜"]').value,
-        부서: tr.querySelector('[data-f="부서"]').value,
-        항목: tr.querySelector('[data-f="항목"]').value,
-        금액: tr.querySelector('[data-f="금액"]').value,
-        수량: tr.querySelector('[data-f="수량"]').value,
-        거래처: tr.querySelector('[data-f="거래처"]').value,
-        비고: tr.querySelector('[data-f="비고"]').value,
-      }));
-    }
-
-    function renderInputTable(rows) {
-      const tbody = document.getElementById("input-tbody");
-      tbody.innerHTML = rows.map((row, i) => `
-        <tr>
-          <td><input type="date" class="input-field" data-f="날짜" value="${row.날짜 || ""}"></td>
-          <td><input class="input-field" data-f="부서" value="${esc(row.부서)}" placeholder="영업"></td>
-          <td><input class="input-field" data-f="항목" value="${esc(row.항목)}" placeholder="제품A"></td>
-          <td><input type="number" class="input-field" data-f="금액" value="${row.금액 ?? ""}"></td>
-          <td><input type="number" class="input-field" data-f="수량" value="${row.수량 ?? ""}"></td>
-          <td><input class="input-field" data-f="거래처" value="${esc(row.거래처 || "")}"></td>
-          <td><input class="input-field" data-f="비고" value="${esc(row.비고 || "")}"></td>
-          <td><button class="del-btn" onclick="removeRow(${i})" title="행 삭제">✕</button></td>
-        </tr>`).join("");
-    }
-
-    function esc(s) { return String(s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
-
-    function removeRow(i) {
-      const rows = getInputRows();
-      if (rows.length <= 1) return;
-      rows.splice(i, 1);
-      renderInputTable(rows);
-    }
-
     function showValidation(result) {
       state.validation = result;
       state.isValidated = result.valid;
@@ -361,7 +307,7 @@
       let html = `<div class="card"><h3>검증 결과</h3>`;
       html += `<div class="alert ${result.valid ? "alert-success" : "alert-error"}">`;
       html += result.valid
-        ? `✅ 검증 성공 — ${result.data.length}건의 데이터가 유효합니다.`
+        ? `✅ 검증 성공 — ${result.data.length}건의 데이터가 반영되었습니다. 아래 메뉴에서 확인하세요.`
         : `❌ 검증 실패 — ${result.errors.length}개의 오류가 발견되었습니다.`;
       html += `</div>`;
       if (result.errors.length) {
@@ -375,9 +321,10 @@
         html += `</div>`;
       }
       if (result.valid) {
-        html += `<div style="margin-top:16px;display:flex;gap:12px">
+        html += `<div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap">
           <button class="btn btn-primary" onclick="goPage('dashboard')">대시보드 보기 →</button>
           <button class="btn btn-secondary" onclick="goPage('report')">분석보고서 보기 →</button>
+          <button class="btn btn-secondary" onclick="goPage('data')">원본데이터 보기 →</button>
         </div>`;
       }
       html += `</div>`;
@@ -740,14 +687,6 @@ ${JSON.stringify(state.data, null, 2)}`;
       });
     }
 
-    document.querySelectorAll(".nav-btn").forEach(btn => {
-      btn.addEventListener("click", () => goPage(btn.dataset.page));
-    });
-
-    document.getElementById("btn-add-row").addEventListener("click", () => {
-      renderInputTable([...getInputRows(), emptyRow()]);
-    });
-
     async function parseFiles(files) {
       const valid = Array.from(files).filter(f => isAllowedFile(f.name));
       if (!valid.length) throw new Error("CSV 또는 Excel 파일만 업로드 가능합니다.");
@@ -765,13 +704,22 @@ ${JSON.stringify(state.data, null, 2)}`;
         const { records, fileNames } = await parseFiles(files);
         state.uploadedFiles = fileNames;
         renderFileTags();
-        renderInputTable(records.length ? records : [emptyRow()]);
         showValidation(validateErpData(records));
       } catch (e) {
         document.getElementById("input-error").innerHTML =
           `<div class="alert alert-error">${e.message || "파일 파싱 오류가 발생했습니다."}</div>`;
       }
     }
+
+    document.querySelectorAll(".nav-btn").forEach(btn => {
+      btn.addEventListener("click", () => goPage(btn.dataset.page));
+    });
+
+    document.getElementById("btn-sample").addEventListener("click", () => {
+      state.uploadedFiles = ["샘플 데이터"];
+      renderFileTags();
+      showValidation(validateErpData(SAMPLE));
+    });
 
     const dropZone = document.getElementById("drop-zone");
     const fileInput = document.getElementById("file-upload");
@@ -798,21 +746,6 @@ ${JSON.stringify(state.data, null, 2)}`;
       if (e.target.files?.length) handleFilesUpload(e.target.files);
       e.target.value = "";
     });
-
-    document.getElementById("btn-sample").addEventListener("click", () => {
-      state.uploadedFiles = [];
-      renderFileTags();
-      renderInputTable(SAMPLE.map(r => ({ ...r })));
-      showValidation(validateErpData(SAMPLE));
-    });
-
-    document.getElementById("btn-validate").addEventListener("click", () => {
-      document.getElementById("input-error").innerHTML = "";
-      const filtered = getInputRows().filter(r => r.날짜 || r.부서 || r.항목 || r.금액 || r.수량);
-      showValidation(validateErpData(filtered));
-    });
-
-    renderInputTable([emptyRow()]);
   </script>
 </body>
 </html>
