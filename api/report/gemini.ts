@@ -15,10 +15,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ detail: "Method not allowed" });
   }
 
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = process.env.GEMINI_API;
   if (!apiKey) {
     return res.status(500).json({
-      detail: "GEMINI_API_KEY 환경 변수가 설정되지 않았습니다. Vercel 대시보드에서 설정해주세요.",
+      detail: "GEMINI_API 환경 변수가 설정되지 않았습니다. Vercel 대시보드에서 설정해주세요.",
     });
   }
 

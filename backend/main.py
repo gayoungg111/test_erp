@@ -31,7 +31,7 @@ class ReportRequest(BaseModel):
 
 @app.get("/api/health")
 def health():
-    has_key = bool(os.getenv("GEMINI_API_KEY"))
+    has_key = bool(os.getenv("GEMINI_API"))
     return {"status": "ok", "gemini_configured": has_key}
 
 
