@@ -1,0 +1,749 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ERP 분석 서비스</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+      background: #f8fafc; color: #1e293b; line-height: 1.5; min-height: 100vh;
+    }
+    .layout { display: flex; min-height: 100vh; }
+    .sidebar {
+      position: fixed; left: 0; top: 0; width: 256px; height: 100vh;
+      background: #1e40af; color: #fff; display: flex; flex-direction: column;
+      box-shadow: 4px 0 24px rgba(0,0,0,.12); z-index: 100;
+    }
+    .sidebar-header { border-bottom: 1px solid #1d4ed8; padding: 24px; }
+    .sidebar-header h1 { font-size: 1.25rem; font-weight: 700; }
+    .sidebar-header p { margin-top: 4px; font-size: .75rem; color: #dbeafe; }
+    .nav { flex: 1; padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; }
+    .nav-btn {
+      display: flex; align-items: center; gap: 12px; width: 100%;
+      padding: 12px 16px; border: none; border-radius: 8px; cursor: pointer;
+      font-size: .875rem; font-weight: 500; text-align: left;
+      background: transparent; color: #dbeafe; transition: .2s;
+    }
+    .nav-btn:hover { background: #1d4ed8; color: #fff; }
+    .nav-btn.active { background: #fff; color: #1e40af; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+    .nav-btn .icon { font-size: 1.125rem; }
+    .sidebar-footer {
+      border-top: 1px solid #1d4ed8; padding: 16px 24px;
+      font-size: .75rem; color: #bfdbfe;
+    }
+    .main { margin-left: 256px; flex: 1; padding: 32px; }
+    .page { display: none; }
+    .page.active { display: block; }
+    .page-title { font-size: 1.5rem; font-weight: 700; color: #1e293b; }
+    .page-desc { margin-top: 4px; font-size: .875rem; color: #64748b; margin-bottom: 24px; }
+    .card {
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,.06); margin-bottom: 24px;
+    }
+    .card h3 { font-size: 1.125rem; font-weight: 600; margin-bottom: 16px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 16px; border-radius: 8px; font-size: .875rem;
+      font-weight: 500; cursor: pointer; border: none; transition: .2s;
+    }
+    .btn:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-primary { background: #2563eb; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #1d4ed8; }
+    .btn-secondary { background: #fff; color: #334155; border: 1px solid #cbd5e1; }
+    .btn-secondary:hover:not(:disabled) { background: #f8fafc; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; align-items: center; }
+    .toolbar .spacer { flex: 1; }
+    .hint {
+      background: #f8fafc; border-radius: 8px; padding: 12px 16px;
+      font-size: .75rem; color: #475569; margin-bottom: 12px;
+    }
+    .input-field {
+      width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1;
+      border-radius: 8px; font-size: .875rem;
+    }
+    .input-field:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px #dbeafe; }
+    table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+    th {
+      background: #f8fafc; padding: 8px 12px; text-align: left;
+      font-size: .75rem; font-weight: 600; text-transform: uppercase;
+      color: #64748b; border-bottom: 1px solid #e2e8f0;
+    }
+    td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; }
+    .alert {
+      padding: 12px 16px; border-radius: 8px; font-size: .875rem; margin-bottom: 16px;
+    }
+    .alert-error { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+    .alert-success { background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534; }
+    .alert-warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+    .stat-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 16px; margin-bottom: 24px;
+    }
+    .stat-card {
+      background: #fff; border: 1px solid #e2e8f0; border-radius: 12px;
+      padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .stat-card .icon { font-size: 1.5rem; margin-bottom: 8px; }
+    .stat-card .label { font-size: .75rem; color: #64748b; font-weight: 500; }
+    .stat-card .value { font-size: 1.125rem; font-weight: 700; margin-top: 4px; }
+    .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @media (max-width: 1024px) { .chart-grid { grid-template-columns: 1fr; } }
+    .chart-box { position: relative; height: 300px; }
+    .empty-state {
+      text-align: center; padding: 64px 24px;
+    }
+    .empty-state .emoji { font-size: 3rem; opacity: .4; margin-bottom: 16px; }
+    .empty-state h3 { font-size: 1.125rem; font-weight: 600; color: #334155; }
+    .empty-state p { margin-top: 8px; font-size: .875rem; color: #64748b; max-width: 400px; margin-inline: auto; }
+    .empty-state .btn { margin-top: 24px; }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      font-size: .75rem; font-weight: 500; background: #dbeafe; color: #1d4ed8;
+    }
+    .report-header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; align-items: flex-start; }
+    .report-actions { display: flex; gap: 12px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
+    .summary-item { background: #f8fafc; border-radius: 8px; padding: 12px 16px; }
+    .summary-item .label { font-size: .75rem; color: #64748b; }
+    .summary-item .value { font-weight: 600; margin-top: 4px; }
+    .insight-box {
+      background: #eff6ff; border-radius: 8px; padding: 16px 20px;
+      font-size: .875rem; line-height: 1.7; color: #334155;
+    }
+    .insight-box p + p { margin-top: 8px; }
+    .text-right { text-align: right; }
+    .del-btn { background: none; border: none; color: #f87171; cursor: pointer; font-size: 1rem; }
+    .del-btn:hover { color: #dc2626; }
+    .tag-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .tag { padding: 6px 12px; border-radius: 8px; font-size: .875rem; font-weight: 500; }
+    .tag-blue { background: #eff6ff; color: #1d4ed8; }
+    .tag-purple { background: #f5f3ff; color: #6d28d9; }
+    .error-list, .warn-list { max-height: 160px; overflow-y: auto; border-radius: 8px; }
+    .error-list { border: 1px solid #fecaca; background: #fef2f2; }
+    .warn-list { border: 1px solid #fde68a; background: #fffbeb; }
+    .error-list div, .warn-list div {
+      padding: 8px 16px; font-size: .75rem; border-bottom: 1px solid rgba(0,0,0,.05);
+    }
+    .table-scroll { overflow-x: auto; }
+    .gemini-box { border: 2px solid #ede9fe; background: linear-gradient(to bottom right, #fff, rgba(245,243,255,.3)); }
+    .gemini-badge { display:inline-block;padding:2px 10px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:.75rem;font-weight:500; }
+    .api-key-row { display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap; }
+    .api-key-row input { flex:1;min-width:200px; }
+    .gemini-content pre { white-space:pre-wrap;font-family:inherit;font-size:.875rem;line-height:1.7;color:#334155; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>ERP 분석 서비스</h1>
+        <p>데이터 검증 · 대시보드 · 보고서</p>
+      </div>
+      <nav class="nav">
+        <button class="nav-btn active" data-page="input"><span class="icon">📥</span>데이터 입력</button>
+        <button class="nav-btn" data-page="dashboard"><span class="icon">📊</span>대시보드</button>
+        <button class="nav-btn" data-page="report"><span class="icon">📄</span>분석보고서</button>
+        <button class="nav-btn" data-page="data"><span class="icon">🗂️</span>원본데이터</button>
+      </nav>
+      <div class="sidebar-footer">ERP Analyzer v1.0 · HTML</div>
+    </aside>
+
+    <main class="main">
+      <!-- 데이터 입력 -->
+      <section id="page-input" class="page active">
+        <h2 class="page-title">데이터 입력</h2>
+        <p class="page-desc">ERP 거래 데이터를 직접 입력하거나 CSV/Excel 파일을 업로드하세요.</p>
+        <div class="card">
+          <div class="toolbar">
+            <label class="btn btn-secondary" style="cursor:pointer">
+              📁 파일 업로드 (CSV/Excel)
+              <input type="file" id="file-upload" accept=".csv,.xlsx,.xls" hidden />
+            </label>
+            <button class="btn btn-secondary" id="btn-sample">샘플 데이터 불러오기</button>
+            <button class="btn btn-secondary" id="btn-add-row">+ 행 추가</button>
+            <div class="spacer"></div>
+            <button class="btn btn-primary" id="btn-validate">데이터 검증</button>
+          </div>
+          <div class="hint"><strong>필수 컬럼:</strong> 날짜, 부서, 항목, 금액, 수량 · 선택: 거래처, 비고</div>
+          <div class="table-scroll">
+            <table id="input-table">
+              <thead>
+                <tr>
+                  <th>날짜</th><th>부서</th><th>항목</th><th>금액</th><th>수량</th>
+                  <th>거래처</th><th>비고</th><th style="width:40px"></th>
+                </tr>
+              </thead>
+              <tbody id="input-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="input-error"></div>
+        <div id="validation-result"></div>
+      </section>
+
+      <!-- 대시보드 -->
+      <section id="page-dashboard" class="page">
+        <div id="dashboard-content"></div>
+      </section>
+
+      <!-- 분석보고서 -->
+      <section id="page-report" class="page">
+        <div id="report-content"></div>
+      </section>
+
+      <!-- 원본데이터 -->
+      <section id="page-data" class="page">
+        <div id="data-content"></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const REQUIRED = ["날짜", "부서", "항목", "금액", "수량"];
+    const SAMPLE = [
+      { 날짜: "2025-01-05", 부서: "영업", 항목: "제품A", 금액: 1500000, 수량: 10, 거래처: "ABC상사", 비고: "" },
+      { 날짜: "2025-01-12", 부서: "영업", 항목: "제품B", 금액: 2300000, 수량: 15, 거래처: "XYZ코퍼", 비고: "" },
+      { 날짜: "2025-02-03", 부서: "구매", 항목: "원자재", 금액: 890000, 수량: 50, 거래처: "공급업체A", 비고: "긴급발주" },
+      { 날짜: "2025-02-18", 부서: "생산", 항목: "제품A", 금액: 1200000, 수량: 8, 거래처: "", 비고: "내부생산" },
+      { 날짜: "2025-03-07", 부서: "영업", 항목: "제품C", 금액: 3100000, 수량: 20, 거래처: "DEF유통", 비고: "" },
+      { 날짜: "2025-03-22", 부서: "재무", 항목: "운영비", 금액: 450000, 수량: 1, 거래처: "", 비고: "사무용품" },
+      { 날짜: "2025-04-01", 부서: "영업", 항목: "제품A", 금액: 1800000, 수량: 12, 거래처: "ABC상사", 비고: "" },
+      { 날짜: "2025-04-15", 부서: "구매", 항목: "포장재", 금액: 320000, 수량: 100, 거래처: "포장업체B", 비고: "" },
+      { 날짜: "2025-05-10", 부서: "생산", 항목: "제품B", 금액: 950000, 수량: 6, 거래처: "", 비고: "" },
+      { 날짜: "2025-05-28", 부서: "영업", 항목: "제품C", 금액: 2700000, 수량: 18, 거래처: "GHI마트", 비고: "대량주문" },
+    ];
+
+    const state = { data: [], summary: {}, validation: null, isValidated: false, charts: {}, geminiReport: null };
+    const COLORS = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626", "#0891b2"];
+
+    function fmt(n) { return Number(n || 0).toLocaleString(); }
+
+    function parseDate(v) {
+      if (!v && v !== 0) return null;
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? null : d;
+    }
+
+    function validateErpData(records) {
+      const errors = [], warnings = [], validRows = [];
+      if (!records.length) {
+        return { valid: false, errors: [{ row: 0, field: "전체", message: "데이터가 비어 있습니다." }], warnings: [], summary: {}, data: [] };
+      }
+      records.forEach((row, idx) => {
+        const rowNum = idx + 1;
+        const rowErrors = [];
+        const dateVal = parseDate(row.날짜);
+        if (!dateVal) rowErrors.push("날짜 형식이 올바르지 않습니다.");
+        if (!row.부서 || String(row.부서).trim() === "") rowErrors.push("부서는 필수입니다.");
+        if (!row.항목 || String(row.항목).trim() === "") rowErrors.push("항목은 필수입니다.");
+        let amount = Number(row.금액);
+        if (isNaN(amount)) rowErrors.push("금액은 숫자여야 합니다.");
+        else if (amount < 0) warnings.push({ row: rowNum, field: "금액", message: "금액이 음수입니다." });
+        let qty = Number(row.수량);
+        if (isNaN(qty)) rowErrors.push("수량은 숫자여야 합니다.");
+        else if (qty < 0) warnings.push({ row: rowNum, field: "수량", message: "수량이 음수입니다." });
+        if (rowErrors.length) rowErrors.forEach(m => errors.push({ row: rowNum, field: "검증", message: m }));
+        else {
+          validRows.push({
+            날짜: dateVal.toISOString().slice(0, 10),
+            부서: String(row.부서).trim(),
+            항목: String(row.항목).trim(),
+            금액: amount, 수량: qty,
+            거래처: row.거래처 ? String(row.거래처).trim() : "",
+            비고: row.비고 ? String(row.비고).trim() : "",
+          });
+        }
+      });
+      const summary = validRows.length ? computeSummary(validRows) : {};
+      return { valid: errors.length === 0 && validRows.length > 0, errors, warnings, summary, data: validRows };
+    }
+
+    function computeSummary(data) {
+      const totalAmount = data.reduce((s, r) => s + r.금액, 0);
+      const totalQty = data.reduce((s, r) => s + r.수량, 0);
+      const dates = data.map(r => r.날짜).sort();
+      const depts = {};
+      data.forEach(r => {
+        if (!depts[r.부서]) depts[r.부서] = { 부서: r.부서, 총금액: 0, 총수량: 0, 건수: 0 };
+        depts[r.부서].총금액 += r.금액; depts[r.부서].총수량 += r.수량; depts[r.부서].건수++;
+      });
+      const items = {};
+      data.forEach(r => {
+        if (!items[r.항목]) items[r.항목] = { 항목: r.항목, 총금액: 0, 총수량: 0 };
+        items[r.항목].총금액 += r.금액; items[r.항목].총수량 += r.수량;
+      });
+      const months = {};
+      data.forEach(r => {
+        const m = r.날짜.slice(0, 7);
+        if (!months[m]) months[m] = { 월: m, 총금액: 0, 건수: 0 };
+        months[m].총금액 += r.금액; months[m].건수++;
+      });
+      return {
+        totalRecords: data.length,
+        totalAmount, totalQuantity: totalQty,
+        avgAmount: totalAmount / data.length,
+        departmentCount: new Set(data.map(r => r.부서)).size,
+        itemCount: new Set(data.map(r => r.항목)).size,
+        dateRange: { start: dates[0], end: dates[dates.length - 1] },
+        byDepartment: Object.values(depts).sort((a, b) => b.총금액 - a.총금액),
+        byItem: Object.values(items).sort((a, b) => b.총금액 - a.총금액).slice(0, 10),
+        byMonth: Object.values(months).sort((a, b) => a.월.localeCompare(b.월)),
+      };
+    }
+
+    function emptyRow() {
+      return { 날짜: "", 부서: "", 항목: "", 금액: "", 수량: "", 거래처: "", 비고: "" };
+    }
+
+    function getInputRows() {
+      return [...document.querySelectorAll("#input-tbody tr")].map(tr => ({
+        날짜: tr.querySelector('[data-f="날짜"]').value,
+        부서: tr.querySelector('[data-f="부서"]').value,
+        항목: tr.querySelector('[data-f="항목"]').value,
+        금액: tr.querySelector('[data-f="금액"]').value,
+        수량: tr.querySelector('[data-f="수량"]').value,
+        거래처: tr.querySelector('[data-f="거래처"]').value,
+        비고: tr.querySelector('[data-f="비고"]').value,
+      }));
+    }
+
+    function renderInputTable(rows) {
+      const tbody = document.getElementById("input-tbody");
+      tbody.innerHTML = rows.map((row, i) => `
+        <tr>
+          <td><input type="date" class="input-field" data-f="날짜" value="${row.날짜 || ""}"></td>
+          <td><input class="input-field" data-f="부서" value="${esc(row.부서)}" placeholder="영업"></td>
+          <td><input class="input-field" data-f="항목" value="${esc(row.항목)}" placeholder="제품A"></td>
+          <td><input type="number" class="input-field" data-f="금액" value="${row.금액 ?? ""}"></td>
+          <td><input type="number" class="input-field" data-f="수량" value="${row.수량 ?? ""}"></td>
+          <td><input class="input-field" data-f="거래처" value="${esc(row.거래처 || "")}"></td>
+          <td><input class="input-field" data-f="비고" value="${esc(row.비고 || "")}"></td>
+          <td><button class="del-btn" onclick="removeRow(${i})" title="행 삭제">✕</button></td>
+        </tr>`).join("");
+    }
+
+    function esc(s) { return String(s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
+
+    function removeRow(i) {
+      const rows = getInputRows();
+      if (rows.length <= 1) return;
+      rows.splice(i, 1);
+      renderInputTable(rows);
+    }
+
+    function showValidation(result) {
+      state.validation = result;
+      state.isValidated = result.valid;
+      state.geminiReport = null;
+      if (result.valid) { state.data = result.data; state.summary = result.summary; }
+      const el = document.getElementById("validation-result");
+      let html = `<div class="card"><h3>검증 결과</h3>`;
+      html += `<div class="alert ${result.valid ? "alert-success" : "alert-error"}">`;
+      html += result.valid
+        ? `✅ 검증 성공 — ${result.data.length}건의 데이터가 유효합니다.`
+        : `❌ 검증 실패 — ${result.errors.length}개의 오류가 발견되었습니다.`;
+      html += `</div>`;
+      if (result.errors.length) {
+        html += `<h4 style="font-size:.875rem;color:#b91c1c;margin-bottom:8px">오류 목록</h4><div class="error-list">`;
+        result.errors.forEach(e => html += `<div>행 ${e.row}: ${e.message}</div>`);
+        html += `</div>`;
+      }
+      if (result.warnings.length) {
+        html += `<h4 style="font-size:.875rem;color:#92400e;margin:12px 0 8px">경고</h4><div class="warn-list">`;
+        result.warnings.forEach(w => html += `<div>행 ${w.row} (${w.field}): ${w.message}</div>`);
+        html += `</div>`;
+      }
+      if (result.valid) {
+        html += `<div style="margin-top:16px;display:flex;gap:12px">
+          <button class="btn btn-primary" onclick="goPage('dashboard')">대시보드 보기 →</button>
+          <button class="btn btn-secondary" onclick="goPage('report')">분석보고서 보기 →</button>
+        </div>`;
+      }
+      html += `</div>`;
+      el.innerHTML = html;
+    }
+
+    function emptyState() {
+      return `<div class="card empty-state">
+        <div class="emoji">📋</div>
+        <h3>아직 불러온 erp 데이터가 없습니다</h3>
+        <button class="btn btn-primary" onclick="goPage('input')">데이터 입력하러가기</button>
+      </div>`;
+    }
+
+    function destroyCharts() {
+      Object.values(state.charts).forEach(c => c.destroy());
+      state.charts = {};
+    }
+
+    function renderDashboard() {
+      const el = document.getElementById("dashboard-content");
+      if (!state.isValidated || !state.data.length) {
+        el.innerHTML = emptyState();
+        return;
+      }
+      const s = state.summary;
+      el.innerHTML = `
+        <h2 class="page-title">대시보드</h2>
+        <p class="page-desc">검증된 ERP 데이터를 기반으로 한 실시간 분석 현황입니다.</p>
+        <div class="stat-grid">
+          ${statCard("📋", "총 거래 건수", fmt(s.totalRecords) + "건")}
+          ${statCard("💰", "총 금액", fmt(s.totalAmount) + "원")}
+          ${statCard("📦", "총 수량", fmt(s.totalQuantity))}
+          ${statCard("📈", "평균 거래금액", fmt(Math.round(s.avgAmount)) + "원")}
+          ${statCard("🏢", "부서 수", s.departmentCount + "개")}
+          ${statCard("📅", "분석 기간", s.dateRange ? s.dateRange.start + " ~ " + s.dateRange.end : "-")}
+        </div>
+        <div class="chart-grid">
+          <div class="card"><h3>부서별 금액</h3><div class="chart-box"><canvas id="chart-dept"></canvas></div></div>
+          <div class="card"><h3>월별 추이</h3><div class="chart-box"><canvas id="chart-month"></canvas></div></div>
+          <div class="card"><h3>항목별 비중 (Top 6)</h3><div class="chart-box"><canvas id="chart-item"></canvas></div></div>
+          <div class="card"><h3>부서별 수량</h3><div class="chart-box"><canvas id="chart-qty"></canvas></div></div>
+        </div>`;
+      destroyCharts();
+      const depts = s.byDepartment || [];
+      state.charts.dept = new Chart(document.getElementById("chart-dept"), {
+        type: "bar",
+        data: { labels: depts.map(d => d.부서), datasets: [{ label: "금액", data: depts.map(d => d.총금액), backgroundColor: "#2563eb", borderRadius: 4 }] },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+      });
+      const months = s.byMonth || [];
+      state.charts.month = new Chart(document.getElementById("chart-month"), {
+        type: "line",
+        data: { labels: months.map(m => m.월), datasets: [{ label: "금액", data: months.map(m => m.총금액), borderColor: "#2563eb", backgroundColor: "rgba(37,99,235,.1)", fill: true, tension: .3 }] },
+        options: { responsive: true, maintainAspectRatio: false },
+      });
+      const items = (s.byItem || []).slice(0, 6);
+      state.charts.item = new Chart(document.getElementById("chart-item"), {
+        type: "doughnut",
+        data: { labels: items.map(i => i.항목), datasets: [{ data: items.map(i => i.총금액), backgroundColor: COLORS }] },
+        options: { responsive: true, maintainAspectRatio: false },
+      });
+      state.charts.qty = new Chart(document.getElementById("chart-qty"), {
+        type: "bar",
+        data: { labels: depts.map(d => d.부서), datasets: [{ label: "수량", data: depts.map(d => d.총수량), backgroundColor: "#7c3aed", borderRadius: 4 }] },
+        options: { indexAxis: "y", responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } },
+      });
+    }
+
+    function statCard(icon, label, value) {
+      return `<div class="stat-card"><div class="icon">${icon}</div><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function generateInsights() {
+      const s = state.summary;
+      const lines = [`총 ${fmt(s.totalRecords)}건의 ERP 거래 데이터를 분석한 결과, 총 금액은 ${fmt(s.totalAmount)}원입니다.`];
+      const topDept = s.byDepartment?.[0];
+      if (topDept) lines.push(`부서별로는 '${topDept.부서}' 부서가 ${fmt(topDept.총금액)}원으로 가장 높은 비중을 차지합니다.`);
+      const months = s.byMonth || [];
+      if (months.length >= 2) {
+        const last = months[months.length - 1].총금액, prev = months[months.length - 2].총금액;
+        if (prev > 0) {
+          const ch = ((last - prev) / prev) * 100;
+          lines.push(`최근 월별 추이를 보면 전월 대비 ${Math.abs(ch).toFixed(1)}% ${ch >= 0 ? "증가" : "감소"}하였습니다.`);
+        }
+      }
+      const topItem = s.byItem?.[0];
+      if (topItem) lines.push(`항목별로는 '${topItem.항목}'이(가) ${fmt(topItem.총금액)}원으로 최다 매출 항목입니다.`);
+      return lines;
+    }
+
+    function renderReport() {
+      const el = document.getElementById("report-content");
+      if (!state.isValidated || !state.data.length) {
+        el.innerHTML = emptyState();
+        return;
+      }
+      const s = state.summary;
+      const savedKey = localStorage.getItem("gemini_api_key") || "";
+      el.innerHTML = `
+        <div class="report-header">
+          <div>
+            <h2 class="page-title">분석보고서</h2>
+            <p class="page-desc">기본 분석은 브라우저에서, AI 종합 보고서는 Google Gemini가 생성합니다.</p>
+          </div>
+          <div class="report-actions">
+            <button class="btn btn-primary" id="btn-gemini" onclick="generateGeminiReport()">✨ Gemini 보고서 생성</button>
+            ${state.geminiReport ? `
+              <button class="btn btn-secondary" onclick="downloadGeminiPdf()">📥 PDF 다운로드</button>
+              <button class="btn btn-secondary" onclick="downloadGeminiWord()">📥 Word 다운로드</button>
+            ` : ""}
+          </div>
+        </div>
+        <div id="report-error"></div>
+        <div id="report-body">
+          <div class="card"><h3>1. 요약 <span style="font-size:.75rem;color:#94a3b8;font-weight:400">(브라우저 분석)</span></h3><div class="summary-grid">
+            ${summaryItem("총 거래 건수", fmt(s.totalRecords) + "건")}
+            ${summaryItem("총 금액", fmt(s.totalAmount) + "원")}
+            ${summaryItem("총 수량", fmt(s.totalQuantity))}
+            ${summaryItem("평균 거래금액", fmt(Math.round(s.avgAmount)) + "원")}
+            ${summaryItem("부서 수", s.departmentCount + "개")}
+            ${summaryItem("항목 수", s.itemCount + "개")}
+            ${summaryItem("분석 기간", s.dateRange ? s.dateRange.start + " ~ " + s.dateRange.end : "-")}
+          </div></div>
+          <div class="card"><h3>2. 부서별 분석 <span style="font-size:.75rem;color:#94a3b8;font-weight:400">(브라우저 분석)</span></h3>${deptTable(s.byDepartment)}</div>
+          <div class="card"><h3>3. 항목별 Top 10 <span style="font-size:.75rem;color:#94a3b8;font-weight:400">(브라우저 분석)</span></h3>${itemTable(s.byItem)}</div>
+          <div class="card"><h3>4. 월별 추이 <span style="font-size:.75rem;color:#94a3b8;font-weight:400">(브라우저 분석)</span></h3>${monthTable(s.byMonth)}</div>
+          <div class="card"><h3>5. 기본 분석 의견 <span style="font-size:.75rem;color:#94a3b8;font-weight:400">(브라우저 분석)</span></h3><div class="insight-box">${generateInsights().map(l => `<p>${l}</p>`).join("")}</div></div>
+          <div class="card gemini-box">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px">
+              <h3>6. AI 종합 보고서</h3>
+              <span class="gemini-badge">Google Gemini</span>
+            </div>
+            <div class="hint" style="margin-bottom:12px">백엔드 서버가 실행 중이면 서버를 통해 생성합니다. 아니면 Gemini API Key를 입력하세요.</div>
+            <div class="api-key-row">
+              <input type="password" class="input-field" id="gemini-api-key" placeholder="Gemini API Key (선택, backend 미사용 시)" value="${savedKey}" />
+              <button class="btn btn-secondary" onclick="saveApiKey()">키 저장</button>
+            </div>
+            <div id="gemini-report-area">
+              ${state.geminiReport
+                ? `<div class="gemini-content" style="background:#fff;border-radius:8px;padding:16px 20px"><pre>${escHtml(state.geminiReport)}</pre></div>`
+                : `<div style="text-align:center;padding:40px 20px;border:1px dashed #ddd6fe;border-radius:8px;background:#fff">
+                    <div style="font-size:2rem;margin-bottom:12px">✨</div>
+                    <p style="font-size:.875rem;color:#475569">「Gemini 보고서 생성」 버튼을 누르면 AI가 경영진용 종합 분석 보고서를 작성합니다.</p>
+                  </div>`}
+            </div>
+          </div>
+        </div>`;
+    }
+
+    function escHtml(text) {
+      return String(text).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    function saveApiKey() {
+      const key = document.getElementById("gemini-api-key")?.value || "";
+      localStorage.setItem("gemini_api_key", key);
+      alert("API Key가 저장되었습니다.");
+    }
+
+    function buildGeminiPrompt() {
+      return `당신은 ERP 데이터 분석 전문가입니다.
+아래 ERP 거래 데이터와 브라우저에서 계산된 분석 요약을 바탕으로,
+경영진에게 제출할 **한국어 ERP 분석 보고서**를 작성해주세요.
+
+## 작성 지침
+- 마크다운 형식 (## 섹션 제목, - 목록)
+- 섹션: 경영 요약, 핵심 지표 분석, 부서별 인사이트, 항목별 매출 분석, 월별 추이 및 전망, 리스크 및 개선 제안, 결론
+- 숫자를 구체적으로 인용하고 실질적 조언 포함
+
+## 분석 요약
+${JSON.stringify(state.summary, null, 2)}
+
+## 원본 데이터 (${state.data.length}건)
+${JSON.stringify(state.data, null, 2)}`;
+    }
+
+    async function generateGeminiReport() {
+      const errEl = document.getElementById("report-error");
+      const btn = document.getElementById("btn-gemini");
+      if (errEl) errEl.innerHTML = "";
+      if (btn) { btn.disabled = true; btn.textContent = "Gemini 생성 중..."; }
+
+      try {
+        let report = null;
+        try {
+          const res = await fetch("/api/report/gemini", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data: state.data, summary: state.summary }),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            report = json.report;
+          }
+        } catch (_) { /* backend unavailable */ }
+
+        if (!report) {
+          const apiKey = document.getElementById("gemini-api-key")?.value || localStorage.getItem("gemini_api_key");
+          if (!apiKey) throw new Error("Gemini API Key를 입력하거나 백엔드 서버를 실행해주세요.");
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: buildGeminiPrompt() }] }],
+              generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error?.message || "Gemini API 호출 실패");
+          }
+          const json = await res.json();
+          report = json.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!report) throw new Error("Gemini가 빈 응답을 반환했습니다.");
+        }
+
+        state.geminiReport = report;
+        renderReport();
+      } catch (e) {
+        if (errEl) errEl.innerHTML = `<div class="alert alert-error">${e.message || "Gemini 보고서 생성 실패"}</div>`;
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "✨ Gemini 보고서 생성"; }
+      }
+    }
+
+    function downloadGeminiPdf() {
+      if (!state.geminiReport) return;
+      const container = document.createElement("div");
+      container.style.cssText = "font-family:'Malgun Gothic',sans-serif;padding:40px;max-width:800px;line-height:1.7";
+      container.innerHTML = `<h1 style="text-align:center">ERP 분석 보고서</h1>
+        <p style="text-align:center;color:#64748b;font-size:13px">Powered by Google Gemini · ${new Date().toLocaleString("ko-KR")}</p>
+        <hr style="margin:24px 0"/><pre style="white-space:pre-wrap;font-family:inherit">${escHtml(state.geminiReport)}</pre>`;
+      document.body.appendChild(container);
+      html2pdf().set({ margin: 10, filename: "erp_report.pdf", html2canvas: { scale: 2 }, jsPDF: { unit: "mm", format: "a4" } })
+        .from(container).save().then(() => document.body.removeChild(container));
+    }
+
+    function downloadGeminiWord() {
+      if (!state.geminiReport) return;
+      const now = new Date().toLocaleString("ko-KR");
+      const html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'></head><body>
+        <h1 style='text-align:center'>ERP 분석 보고서</h1><p>생성일: ${now} · Powered by Google Gemini</p>
+        <pre style='font-family:Malgun Gothic;white-space:pre-wrap'>${escHtml(state.geminiReport)}</pre></body></html>`;
+      const blob = new Blob(["\ufeff" + html], { type: "application/msword" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "erp_report.doc";
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    function summaryItem(label, value) {
+      return `<div class="summary-item"><div class="label">${label}</div><div class="value">${value}</div></div>`;
+    }
+
+    function deptTable(rows) {
+      if (!rows?.length) return "<p>데이터 없음</p>";
+      return `<div class="table-scroll"><table><thead><tr><th>부서</th><th class="text-right">총금액</th><th class="text-right">총수량</th><th class="text-right">건수</th></tr></thead><tbody>
+        ${rows.map(r => `<tr><td>${r.부서}</td><td class="text-right">${fmt(r.총금액)}원</td><td class="text-right">${fmt(r.총수량)}</td><td class="text-right">${r.건수}</td></tr>`).join("")}
+      </tbody></table></div>`;
+    }
+
+    function itemTable(rows) {
+      if (!rows?.length) return "<p>데이터 없음</p>";
+      return `<div class="table-scroll"><table><thead><tr><th>항목</th><th class="text-right">총금액</th><th class="text-right">총수량</th></tr></thead><tbody>
+        ${rows.map(r => `<tr><td>${r.항목}</td><td class="text-right">${fmt(r.총금액)}원</td><td class="text-right">${fmt(r.총수량)}</td></tr>`).join("")}
+      </tbody></table></div>`;
+    }
+
+    function monthTable(rows) {
+      if (!rows?.length) return "<p>데이터 없음</p>";
+      return `<div class="table-scroll"><table><thead><tr><th>월</th><th class="text-right">총금액</th><th class="text-right">건수</th></tr></thead><tbody>
+        ${rows.map(r => `<tr><td>${r.월}</td><td class="text-right">${fmt(r.총금액)}원</td><td class="text-right">${r.건수}</td></tr>`).join("")}
+      </tbody></table></div>`;
+    }
+
+    function renderOriginalData() {
+      const el = document.getElementById("data-content");
+      if (!state.isValidated || !state.data.length) {
+        el.innerHTML = emptyState();
+        return;
+      }
+      const totalAmount = state.data.reduce((s, r) => s + r.금액, 0);
+      const totalQty = state.data.reduce((s, r) => s + r.수량, 0);
+      el.innerHTML = `
+        <div class="report-header">
+          <div>
+            <h2 class="page-title">원본데이터</h2>
+            <p class="page-desc">검증을 통과한 ERP 원본 데이터 ${state.data.length}건을 확인할 수 있습니다.</p>
+          </div>
+          <div class="tag-row">
+            <span class="tag tag-blue">총 금액: ${fmt(totalAmount)}원</span>
+            <span class="tag tag-purple">총 수량: ${fmt(totalQty)}</span>
+          </div>
+        </div>
+        <div class="card table-scroll" style="padding:0">
+          <table><thead><tr>
+            <th>#</th><th>날짜</th><th>부서</th><th>항목</th>
+            <th class="text-right">금액</th><th class="text-right">수량</th><th>거래처</th><th>비고</th>
+          </tr></thead><tbody>
+            ${state.data.map((r, i) => `<tr>
+              <td style="color:#94a3b8">${i + 1}</td>
+              <td>${r.날짜}</td>
+              <td><span class="badge">${r.부서}</span></td>
+              <td style="font-weight:500">${r.항목}</td>
+              <td class="text-right">${fmt(r.금액)}원</td>
+              <td class="text-right">${fmt(r.수량)}</td>
+              <td style="color:#475569">${r.거래처 || "-"}</td>
+              <td style="color:#64748b">${r.비고 || "-"}</td>
+            </tr>`).join("")}
+          </tbody></table>
+        </div>`;
+    }
+
+    function goPage(name) {
+      document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+      document.querySelectorAll(".nav-btn").forEach(b => b.classList.remove("active"));
+      document.getElementById("page-" + name).classList.add("active");
+      document.querySelector(`.nav-btn[data-page="${name}"]`).classList.add("active");
+      if (name === "dashboard") renderDashboard();
+      if (name === "report") renderReport();
+      if (name === "data") renderOriginalData();
+    }
+
+    function parseFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          try {
+            let records;
+            if (file.name.endsWith(".csv")) {
+              const text = e.target.result;
+              const wb = XLSX.read(text, { type: "string" });
+              records = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+            } else {
+              const wb = XLSX.read(e.target.result, { type: "array" });
+              records = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+            }
+            resolve(records);
+          } catch (err) { reject(err); }
+        };
+        reader.onerror = reject;
+        if (file.name.endsWith(".csv")) reader.readAsText(file, "UTF-8");
+        else reader.readAsArrayBuffer(file);
+      });
+    }
+
+    document.querySelectorAll(".nav-btn").forEach(btn => {
+      btn.addEventListener("click", () => goPage(btn.dataset.page));
+    });
+
+    document.getElementById("btn-add-row").addEventListener("click", () => {
+      renderInputTable([...getInputRows(), emptyRow()]);
+    });
+
+    document.getElementById("btn-sample").addEventListener("click", () => {
+      renderInputTable(SAMPLE.map(r => ({ ...r })));
+      showValidation(validateErpData(SAMPLE));
+    });
+
+    document.getElementById("btn-validate").addEventListener("click", () => {
+      document.getElementById("input-error").innerHTML = "";
+      const filtered = getInputRows().filter(r => r.날짜 || r.부서 || r.항목 || r.금액 || r.수량);
+      showValidation(validateErpData(filtered));
+    });
+
+    document.getElementById("file-upload").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      document.getElementById("input-error").innerHTML = "";
+      try {
+        const records = await parseFile(file);
+        renderInputTable(records.length ? records : [emptyRow()]);
+        showValidation(validateErpData(records));
+      } catch {
+        document.getElementById("input-error").innerHTML = `<div class="alert alert-error">파일 파싱 오류가 발생했습니다.</div>`;
+      }
+      e.target.value = "";
+    });
+
+    renderInputTable([emptyRow()]);
+  </script>
+</body>
+</html>

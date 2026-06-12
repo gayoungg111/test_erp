@@ -1,0 +1,27 @@
+# Dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+# Environment (API keys)
+backend/.env
+.env
+.env.local
+
+# Python
+backend/__pycache__/
+backend/**/__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
