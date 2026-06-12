@@ -162,7 +162,7 @@ export async function parseUploadedFile(file: File): Promise<ErpRecord[]> {
   const buffer = await file.arrayBuffer();
 
   let workbook;
-  if (file.name.endsWith(".csv")) {
+  if (file.name.toLowerCase().endsWith(".csv")) {
     const text = new TextDecoder("utf-8").decode(buffer);
     workbook = XLSX.read(text, { type: "string" });
   } else {
@@ -181,4 +181,29 @@ export async function parseUploadedFile(file: File): Promise<ErpRecord[]> {
     거래처: row["거래처"] != null ? String(row["거래처"]) : "",
     비고: row["비고"] != null ? String(row["비고"]) : "",
   }));
+}
+
+const ALLOWED_EXTENSIONS = [".csv", ".xlsx", ".xls"];
+
+export function isAllowedUploadFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  return ALLOWED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+export async function parseUploadedFiles(files: File[]): Promise<{
+  records: ErpRecord[];
+  fileNames: string[];
+}> {
+  const validFiles = files.filter((f) => isAllowedUploadFile(f.name));
+  if (validFiles.length === 0) {
+    throw new Error("CSV 또는 Excel(.csv, .xlsx, .xls) 파일만 업로드 가능합니다.");
+  }
+
+  const records: ErpRecord[] = [];
+  for (const file of validFiles) {
+    const parsed = await parseUploadedFile(file);
+    records.push(...parsed);
+  }
+
+  return { records, fileNames: validFiles.map((f) => f.name) };
 }

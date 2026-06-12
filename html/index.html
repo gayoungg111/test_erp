@@ -130,7 +130,20 @@
       padding: 8px 16px; font-size: .75rem; border-bottom: 1px solid rgba(0,0,0,.05);
     }
     .table-scroll { overflow-x: auto; }
-    .gemini-box { border: 2px solid #ede9fe; background: linear-gradient(to bottom right, #fff, rgba(245,243,255,.3)); }
+    .drop-zone {
+      border: 2px dashed #cbd5e1; border-radius: 12px; padding: 40px 24px;
+      text-align: center; background: #f8fafc; cursor: pointer; transition: .2s; margin-bottom: 16px;
+    }
+    .drop-zone:hover, .drop-zone.dragging {
+      border-color: #3b82f6; background: #eff6ff;
+    }
+    .drop-zone .icon { font-size: 2.5rem; opacity: .5; }
+    .file-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .file-tag {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 12px; border-radius: 999px; background: #eff6ff;
+      color: #1d4ed8; font-size: .75rem; font-weight: 500;
+    }
     .gemini-badge { display:inline-block;padding:2px 10px;border-radius:999px;background:#ede9fe;color:#6d28d9;font-size:.75rem;font-weight:500; }
     .api-key-row { display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap; }
     .api-key-row input { flex:1;min-width:200px; }
@@ -157,13 +170,16 @@
       <!-- 데이터 입력 -->
       <section id="page-input" class="page active">
         <h2 class="page-title">데이터 입력</h2>
-        <p class="page-desc">ERP 거래 데이터를 직접 입력하거나 CSV/Excel 파일을 업로드하세요.</p>
+        <p class="page-desc">ERP 거래 데이터를 직접 입력하거나 CSV/Excel 파일을 업로드하세요. 여러 파일을 한번에 올릴 수 있습니다.</p>
         <div class="card">
+          <div id="drop-zone" class="drop-zone">
+            <input type="file" id="file-upload" accept=".csv,.xlsx,.xls" multiple hidden />
+            <div class="icon">📂</div>
+            <p style="margin-top:12px;font-size:.875rem;font-weight:500;color:#334155">파일을 끌어다 놓거나 클릭하여 선택</p>
+            <p style="margin-top:4px;font-size:.75rem;color:#64748b">CSV / Excel · 여러 개 동시 업로드 가능</p>
+            <div id="file-tags" class="file-tags"></div>
+          </div>
           <div class="toolbar">
-            <label class="btn btn-secondary" style="cursor:pointer">
-              📁 파일 업로드 (CSV/Excel)
-              <input type="file" id="file-upload" accept=".csv,.xlsx,.xls" hidden />
-            </label>
             <button class="btn btn-secondary" id="btn-sample">샘플 데이터 불러오기</button>
             <button class="btn btn-secondary" id="btn-add-row">+ 행 추가</button>
             <div class="spacer"></div>
@@ -218,7 +234,7 @@
       { 날짜: "2025-05-28", 부서: "영업", 항목: "제품C", 금액: 2700000, 수량: 18, 거래처: "GHI마트", 비고: "대량주문" },
     ];
 
-    const state = { data: [], summary: {}, validation: null, isValidated: false, charts: {}, geminiReport: null };
+    const state = { data: [], summary: {}, validation: null, isValidated: false, charts: {}, geminiReport: null, uploadedFiles: [] };
     const COLORS = ["#2563eb", "#7c3aed", "#059669", "#d97706", "#dc2626", "#0891b2"];
 
     function fmt(n) { return Number(n || 0).toLocaleString(); }
@@ -688,6 +704,19 @@ ${JSON.stringify(state.data, null, 2)}`;
       if (name === "data") renderOriginalData();
     }
 
+    function isAllowedFile(name) {
+      const lower = name.toLowerCase();
+      return [".csv", ".xlsx", ".xls"].some(ext => lower.endsWith(ext));
+    }
+
+    function renderFileTags() {
+      const el = document.getElementById("file-tags");
+      if (!el) return;
+      el.innerHTML = state.uploadedFiles.map(name =>
+        `<span class="file-tag">📄 ${name}</span>`
+      ).join("");
+    }
+
     function parseFile(file) {
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -719,7 +748,60 @@ ${JSON.stringify(state.data, null, 2)}`;
       renderInputTable([...getInputRows(), emptyRow()]);
     });
 
+    async function parseFiles(files) {
+      const valid = Array.from(files).filter(f => isAllowedFile(f.name));
+      if (!valid.length) throw new Error("CSV 또는 Excel 파일만 업로드 가능합니다.");
+      const all = [];
+      for (const file of valid) {
+        const records = await parseFile(file);
+        all.push(...records);
+      }
+      return { records: all, fileNames: valid.map(f => f.name) };
+    }
+
+    async function handleFilesUpload(files) {
+      document.getElementById("input-error").innerHTML = "";
+      try {
+        const { records, fileNames } = await parseFiles(files);
+        state.uploadedFiles = fileNames;
+        renderFileTags();
+        renderInputTable(records.length ? records : [emptyRow()]);
+        showValidation(validateErpData(records));
+      } catch (e) {
+        document.getElementById("input-error").innerHTML =
+          `<div class="alert alert-error">${e.message || "파일 파싱 오류가 발생했습니다."}</div>`;
+      }
+    }
+
+    const dropZone = document.getElementById("drop-zone");
+    const fileInput = document.getElementById("file-upload");
+
+    dropZone.addEventListener("click", () => fileInput.click());
+
+    dropZone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropZone.classList.add("dragging");
+    });
+
+    dropZone.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("dragging");
+    });
+
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("dragging");
+      if (e.dataTransfer.files.length) handleFilesUpload(e.dataTransfer.files);
+    });
+
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files?.length) handleFilesUpload(e.target.files);
+      e.target.value = "";
+    });
+
     document.getElementById("btn-sample").addEventListener("click", () => {
+      state.uploadedFiles = [];
+      renderFileTags();
       renderInputTable(SAMPLE.map(r => ({ ...r })));
       showValidation(validateErpData(SAMPLE));
     });
@@ -728,20 +810,6 @@ ${JSON.stringify(state.data, null, 2)}`;
       document.getElementById("input-error").innerHTML = "";
       const filtered = getInputRows().filter(r => r.날짜 || r.부서 || r.항목 || r.금액 || r.수량);
       showValidation(validateErpData(filtered));
-    });
-
-    document.getElementById("file-upload").addEventListener("change", async (e) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      document.getElementById("input-error").innerHTML = "";
-      try {
-        const records = await parseFile(file);
-        renderInputTable(records.length ? records : [emptyRow()]);
-        showValidation(validateErpData(records));
-      } catch {
-        document.getElementById("input-error").innerHTML = `<div class="alert alert-error">파일 파싱 오류가 발생했습니다.</div>`;
-      }
-      e.target.value = "";
     });
 
     renderInputTable([emptyRow()]);

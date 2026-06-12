@@ -5,9 +5,9 @@ export async function validateData(data: ErpRecord[]): Promise<ValidationResult>
   return validateErpData(data);
 }
 
-export async function uploadFile(file: File): Promise<ValidationResult> {
-  const { parseUploadedFile, validateErpData } = await import("./analyzer");
-  const records = await parseUploadedFile(file);
+export async function uploadFiles(files: File[]): Promise<ValidationResult> {
+  const { parseUploadedFiles, validateErpData } = await import("./analyzer");
+  const { records } = await parseUploadedFiles(files);
   return validateErpData(records);
 }
 
