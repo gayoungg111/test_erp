@@ -1,5 +1,5 @@
 import type { DownloadFormat } from "../components/DownloadMenu";
-import { getSupabaseRuntimeConfig } from "./supabaseConfig";
+import { describeSupabaseConfig, getSupabaseRuntimeConfig } from "./supabaseConfig";
 
 export interface DownloadRequestPayload {
   email: string;
@@ -49,11 +49,7 @@ function parseSupabaseError(status: number, text: string): string {
   }
 
   if (text.includes("Invalid API key")) {
-    return [
-      "Supabase API 키가 올바르지 않습니다.",
-      "Vercel → supabase_anon_key 에 anon public 키를 넣었는지,",
-      "supabase_url 과 같은 프로젝트인지 확인 후 Redeploy 해주세요.",
-    ].join(" ");
+    return "Supabase API 키가 올바르지 않습니다. supabase_anon_key(anon public)와 supabase_url이 같은 프로젝트인지 확인 후 Redeploy 해주세요.";
   }
 
   return text.length > 180 ? `${text.slice(0, 180)}...` : text;
@@ -95,6 +91,8 @@ export async function saveDownloadRequest(payload: DownloadRequestPayload): Prom
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(parseSupabaseError(res.status, text));
+    const base = parseSupabaseError(res.status, text);
+    const diag = describeSupabaseConfig(url, anonKey);
+    throw new Error(`${base} (${diag})`);
   }
 }

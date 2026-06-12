@@ -11,6 +11,34 @@ function clean(value: unknown): string {
     .replace(/^["']|["']$/g, "");
 }
 
+export function decodeSupabaseKeyRole(key: string): string | null {
+  if (!key.startsWith("eyJ")) return key.startsWith("sb_publishable_") ? "publishable" : null;
+  try {
+    const payload = key.split(".")[1];
+    if (!payload) return null;
+    const json = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))) as {
+      role?: string;
+      ref?: string;
+    };
+    return json.role ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function describeSupabaseConfig(url: string, anonKey: string): string {
+  const role = decodeSupabaseKeyRole(anonKey);
+  const parts = [
+    url ? `URL: ${url}` : "URL: (비어 있음)",
+    anonKey ? `키 길이: ${anonKey.length}자` : "키: (비어 있음)",
+  ];
+  if (role) parts.push(`키 종류: ${role}`);
+  if (role === "service_role") {
+    parts.push("→ supabase_anon_key에 service_role이 들어가 있습니다. anon public 키로 바꿔주세요.");
+  }
+  return parts.join(" · ");
+}
+
 function fromImportMeta(): SupabaseRuntimeConfig {
   return {
     url: clean(import.meta.env.VITE_SUPABASE_URL),
