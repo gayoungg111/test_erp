@@ -7,6 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -120,6 +121,24 @@
     }
     .download-menu-panel button:hover { background: #f8fafc; }
     .download-menu-panel button span:last-child { font-size: .75rem; color: #94a3b8; }
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 200; display: none;
+      align-items: center; justify-content: center; background: rgba(15,23,42,.5); padding: 16px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      width: 100%; max-width: 420px; background: #fff; border-radius: 16px;
+      border: 1px solid #e2e8f0; padding: 24px; box-shadow: 0 25px 50px rgba(15,23,42,.2);
+    }
+    .modal-box h3 { font-size: 1.125rem; font-weight: 700; color: #1e293b; }
+    .modal-box .modal-desc { margin-top: 4px; font-size: .875rem; color: #64748b; }
+    .modal-field { margin-top: 16px; }
+    .modal-field label { display: block; margin-bottom: 6px; font-size: .875rem; font-weight: 500; color: #334155; }
+    .modal-actions { display: flex; gap: 12px; margin-top: 20px; }
+    .modal-actions .btn { flex: 1; justify-content: center; }
+    .modal-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+    .modal-close { border: none; background: none; color: #94a3b8; font-size: 1.125rem; cursor: pointer; padding: 4px; border-radius: 8px; }
+    .modal-close:hover { background: #f1f5f9; color: #475569; }
     .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
     .summary-item { background: #f8fafc; border-radius: 8px; padding: 12px 16px; }
     .summary-item .label { font-size: .75rem; color: #64748b; }
@@ -218,7 +237,127 @@
     </main>
   </div>
 
+  <div id="download-modal" class="modal-overlay" onclick="closeDownloadModal()">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <div>
+          <h3>보고서 받아보기</h3>
+          <p class="modal-desc" id="download-modal-format">파일 형식</p>
+        </div>
+        <button type="button" class="modal-close" onclick="closeDownloadModal()" aria-label="닫기">✕</button>
+      </div>
+      <form id="download-modal-form" onsubmit="submitDownloadModal(event)">
+        <div class="modal-field">
+          <label for="download-email">이메일</label>
+          <input id="download-email" type="email" class="input-field" placeholder="example@email.com" required />
+        </div>
+        <div class="modal-field">
+          <label for="download-nickname">닉네임</label>
+          <input id="download-nickname" type="text" class="input-field" placeholder="닉네임을 입력하세요" maxlength="50" required />
+        </div>
+        <div id="download-modal-error"></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="closeDownloadModal()">취소</button>
+          <button type="submit" class="btn btn-primary" id="download-modal-submit">받아보기</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
+    // HTML 버전 Supabase 설정 (Project Settings > API에서 확인)
+    const APP_CONFIG = {
+      supabaseUrl: "",
+      supabaseAnonKey: "",
+    };
+
+    const FORMAT_LABELS = { word: "Word (.doc)", excel: "Excel (.xlsx)", pdf: "PDF (.pdf)" };
+    let pendingDownloadFormat = null;
+    let supabaseClient = null;
+
+    function getSupabaseClient() {
+      if (supabaseClient) return supabaseClient;
+      if (!APP_CONFIG.supabaseUrl || !APP_CONFIG.supabaseAnonKey) return null;
+      supabaseClient = window.supabase.createClient(APP_CONFIG.supabaseUrl, APP_CONFIG.supabaseAnonKey);
+      return supabaseClient;
+    }
+
+    function validateDownloadForm(email, nickname) {
+      const trimmedEmail = (email || "").trim();
+      const trimmedNickname = (nickname || "").trim();
+      if (!trimmedNickname) return "닉네임을 입력해주세요.";
+      if (trimmedNickname.length > 50) return "닉네임은 50자 이내로 입력해주세요.";
+      if (!trimmedEmail) return "이메일을 입력해주세요.";
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) return "올바른 이메일 형식을 입력해주세요.";
+      return null;
+    }
+
+    async function saveDownloadRequestToSupabase(payload) {
+      const client = getSupabaseClient();
+      if (!client) throw new Error("Supabase가 설정되지 않았습니다. APP_CONFIG에 URL과 anon key를 입력해주세요.");
+      const { error } = await client.from("download_requests").insert({
+        email: payload.email,
+        nickname: payload.nickname,
+        file_format: payload.format,
+        record_count: payload.recordCount ?? null,
+      });
+      if (error) throw new Error(error.message || "다운로드 요청 저장에 실패했습니다.");
+    }
+
+    function openDownloadModal(format) {
+      const panel = document.getElementById("download-menu-panel");
+      if (panel) panel.style.display = "none";
+      pendingDownloadFormat = format;
+      document.getElementById("download-modal-format").textContent = (FORMAT_LABELS[format] || format) + " 형식으로 다운로드합니다.";
+      document.getElementById("download-modal-error").innerHTML = "";
+      document.getElementById("download-modal").classList.add("open");
+    }
+
+    function closeDownloadModal() {
+      pendingDownloadFormat = null;
+      document.getElementById("download-modal").classList.remove("open");
+      document.getElementById("download-modal-form").reset();
+      document.getElementById("download-modal-error").innerHTML = "";
+    }
+
+    async function submitDownloadModal(e) {
+      e.preventDefault();
+      if (!pendingDownloadFormat) return;
+      const email = document.getElementById("download-email").value;
+      const nickname = document.getElementById("download-nickname").value;
+      const errEl = document.getElementById("download-modal-error");
+      const submitBtn = document.getElementById("download-modal-submit");
+      const validationError = validateDownloadForm(email, nickname);
+      if (validationError) {
+        errEl.innerHTML = `<div class="alert alert-error" style="margin-top:12px">${validationError}</div>`;
+        return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.textContent = "처리 중...";
+      errEl.innerHTML = "";
+      try {
+        await saveDownloadRequestToSupabase({
+          email: email.trim(),
+          nickname: nickname.trim(),
+          format: pendingDownloadFormat,
+          recordCount: state.data?.length || 0,
+        });
+        const format = pendingDownloadFormat;
+        closeDownloadModal();
+        executeDownload(format);
+      } catch (err) {
+        errEl.innerHTML = `<div class="alert alert-error" style="margin-top:12px">${err.message || "요청 처리에 실패했습니다."}</div>`;
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "받아보기";
+      }
+    }
+
+    function executeDownload(format) {
+      if (format === "word") downloadReportWord();
+      else if (format === "excel") downloadReportExcel();
+      else downloadReportPdf();
+    }
     const REQUIRED = ["날짜", "부서", "항목", "금액", "수량"];
     const SAMPLE = [
       { 날짜: "2025-01-05", 부서: "영업", 항목: "제품A", 금액: 1500000, 수량: 10, 거래처: "ABC상사", 비고: "" },
@@ -579,9 +718,9 @@
             <div class="download-menu" id="download-menu">
               <button class="btn btn-secondary" type="button" onclick="toggleDownloadMenu(event)">📥 다운로드 ▾</button>
               <div class="download-menu-panel" id="download-menu-panel" style="display:none">
-                <button type="button" onclick="downloadReport('word')"><span>Word 파일</span><span>.doc</span></button>
-                <button type="button" onclick="downloadReport('excel')"><span>Excel 파일</span><span>.xlsx</span></button>
-                <button type="button" onclick="downloadReport('pdf')"><span>PDF 파일</span><span>.pdf</span></button>
+                <button type="button" onclick="openDownloadModal('word')"><span>Word 파일</span><span>.doc</span></button>
+                <button type="button" onclick="openDownloadModal('excel')"><span>Excel 파일</span><span>.xlsx</span></button>
+                <button type="button" onclick="openDownloadModal('pdf')"><span>PDF 파일</span><span>.pdf</span></button>
               </div>
             </div>
           </div>
@@ -754,13 +893,7 @@ ${JSON.stringify(state.data, null, 2)}`;
     }
 
     function downloadReport(format) {
-      const panel = document.getElementById("download-menu-panel");
-      if (panel) panel.style.display = "none";
-      if (!state.isValidated || !state.data.length) return;
-
-      if (format === "word") downloadReportWord();
-      else if (format === "excel") downloadReportExcel();
-      else downloadReportPdf();
+      openDownloadModal(format);
     }
 
     function downloadReportPdf() {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import DownloadMenu, { type DownloadFormat } from "../components/DownloadMenu";
+import DownloadMenu, { type DownloadFormat, type DownloadUserInfo } from "../components/DownloadMenu";
 import EmptyState from "../components/EmptyState";
 import { useData } from "../context/DataContext";
 import { generateBasicInsights } from "../services/analyzer";
@@ -70,7 +70,7 @@ export default function AnalysisReport() {
     }
   };
 
-  const handleDownload = async (format: DownloadFormat) => {
+  const handleDownload = async (format: DownloadFormat, _user: DownloadUserInfo) => {
     setDownloading(format);
     setError("");
     try {
@@ -107,6 +107,7 @@ export default function AnalysisReport() {
             onDownload={handleDownload}
             disabled={generating}
             loading={downloading}
+            recordCount={data.length}
           />
         </div>
       </div>
