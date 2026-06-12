@@ -103,6 +103,7 @@ def create_gemini_report(request: ReportRequest):
 
 
 @app.post("/api/download/register")
+@app.post("/api/download-register")
 def register_download(request: DownloadRegisterRequest):
     email = request.email.strip()
     nickname = request.nickname.strip()
