@@ -15,9 +15,12 @@ create index if not exists download_requests_created_at_idx
 
 alter table public.download_requests enable row level security;
 
--- anon(브라우저)에서 insert만 허용
+drop policy if exists "Allow anonymous insert on download_requests" on public.download_requests;
+
 create policy "Allow anonymous insert on download_requests"
   on public.download_requests
   for insert
   to anon
   with check (true);
+
+-- service_role은 RLS를 우회하므로 별도 정책 없이 insert 가능합니다.
