@@ -6,8 +6,19 @@ export default defineConfig(({ mode }) => {
   const localEnv = loadEnv(mode, ".", "");
   const env = { ...rootEnv, ...localEnv };
 
-  const supabaseUrl = env.supabase_url || env.VITE_SUPABASE_URL || "";
-  const supabaseAnonKey = env.supabase_anon_key || env.VITE_SUPABASE_ANON_KEY || "";
+  const supabaseUrl =
+    process.env.supabase_url ||
+    process.env.SUPABASE_URL ||
+    env.supabase_url ||
+    env.VITE_SUPABASE_URL ||
+    "";
+
+  const supabaseAnonKey =
+    process.env.supabase_anon_key ||
+    process.env.SUPABASE_ANON_KEY ||
+    env.supabase_anon_key ||
+    env.VITE_SUPABASE_ANON_KEY ||
+    "";
 
   return {
     plugins: [react()],

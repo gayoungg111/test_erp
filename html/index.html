@@ -264,6 +264,11 @@
   </div>
 
   <script>
+    const SUPABASE = {
+      url: "",
+      anonKey: "",
+    };
+
     const FORMAT_LABELS = { word: "Word (.doc)", excel: "Excel (.xlsx)", pdf: "PDF (.pdf)" };
     let pendingDownloadFormat = null;
 
@@ -278,30 +283,33 @@
     }
 
     async function saveDownloadRequestToSupabase(payload) {
-      const paths = ["/api/download-register", "/api/download/register"];
-      let lastError = null;
-
-      for (const path of paths) {
-        try {
-          const res = await fetch(path, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              email: payload.email,
-              nickname: payload.nickname,
-              format: payload.format,
-              recordCount: payload.recordCount ?? null,
-            }),
-          });
-          if (res.ok) return;
-          const err = await res.json().catch(() => ({}));
-          lastError = new Error(err.detail || `저장 실패 (HTTP ${res.status})`);
-        } catch (e) {
-          lastError = e;
-        }
+      if (!SUPABASE.url || !SUPABASE.anonKey) {
+        throw new Error("Supabase 설정이 필요합니다. html/index.html의 SUPABASE.url, SUPABASE.anonKey를 입력해주세요.");
       }
 
-      throw lastError || new Error("다운로드 요청 저장에 실패했습니다.");
+      const baseUrl = SUPABASE.url.replace(/\/$/, "");
+      const res = await fetch(`${baseUrl}/rest/v1/download_requests`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: SUPABASE.anonKey,
+          Authorization: `Bearer ${SUPABASE.anonKey}`,
+          Prefer: "return=minimal",
+        },
+        body: JSON.stringify([{
+          email: payload.email,
+          nickname: payload.nickname,
+          file_format: payload.format,
+          record_count: payload.recordCount ?? null,
+        }]),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text.includes("Could not find the table")
+          ? "download_requests 테이블이 없습니다. Supabase SQL Editor에서 schema.sql을 실행해주세요."
+          : (text || `Supabase 저장 실패 (HTTP ${res.status})`));
+      }
     }
 
     function openDownloadModal(format) {
